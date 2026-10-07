@@ -255,6 +255,129 @@ Successful `result.json` has this shape:
 
 Those numbers are one observed proof, not target accuracy. With two clients, two rounds, one local epoch, and the 1% sample on this Mac, cached-dataset reruns took 3.98 seconds for FedAvg and 4.16 seconds for FedProx. The first run additionally downloaded approximately 64 MB of MNIST data and initialized the training stack; first-run time depends on network and cache state.
 
-**Follow it yourself:** Run the [MVP-02 commands](../backend/README.md) from `backend/`. Use separate output directories for FedAvg and FedProx; inspect each `result.json` and `run.log`. A configuration such as `{"algorithm":"unknown"}` must exit nonzero, log a validation error, and leave no result. For an execution failure, pass a regular file as `<dataset-dir>`; FLUKE raises `NotADirectoryError`, the log has a traceback, and no result is written. These demonstrations do not require PostgreSQL or the API.
+### MVP-02 — complete test guide
 
-**Automated checks:** [test_runner.py](../backend/tests/test_runner.py) covers fixed settings, invalid choices, complete/short/interrupted results, nonfinite accuracy, stale-result removal, and a real initialization failure when the runner extra is installed. `uv run --locked --extra runner pytest -q -rs` passed **68 tests** with disposable PostgreSQL enabled. Ruff lint/format, `uv build`, and `alembic check` passed. The base install omits FLUKE; its suite skips the one optional runner integration test. Generated datasets, logs, and result files stay under ignored `backend/artifacts/`.
+These checks run the runner directly. The API, PostgreSQL, and an account are not needed for steps 1–5. Use the same terminal for the commands so the `guide_dir` variable remains set. Output goes under ignored `backend/artifacts/`; no dataset, log, or result file belongs in Git.
+
+#### 1. Install the optional training stack and prepare fresh inputs
+
+From the repository root:
+
+```sh
+cd backend
+uv sync --locked --extra runner
+mkdir -p artifacts
+guide_dir=$(mktemp -d artifacts/mvp02-guide.XXXXXX)
+printf 'Proof directory: %s\n' "$guide_dir"
+
+cat > "$guide_dir/fedavg.json" <<'JSON'
+{"algorithm":"fedavg","n_clients":2,"n_rounds":2,"local_epochs":1}
+JSON
+cat > "$guide_dir/fedprox.json" <<'JSON'
+{"algorithm":"fedprox","n_clients":2,"n_rounds":2,"local_epochs":1,"mu":0.3}
+JSON
+```
+
+`uv sync --locked --extra runner` installs the FLUKE revision in the lockfile and its PyTorch dependencies. The two JSON files contain exactly the values the future worker will pass. The three path arguments in the next step are chosen outside the JSON. The first run may download the full MNIST dataset into `$guide_dir/mnist`, so it needs network access and takes longer than a cached run. The runner uses 1% of that dataset for training and evaluation.
+
+#### 2. Run both algorithms in separate processes
+
+```sh
+uv run --locked --extra runner python -m fluke_backend.runner_cli \
+  "$guide_dir/fedavg.json" "$guide_dir/fedavg" "$guide_dir/mnist"
+printf 'FedAvg exit: %s\n' "$?"
+
+uv run --locked --extra runner python -m fluke_backend.runner_cli \
+  "$guide_dir/fedprox.json" "$guide_dir/fedprox" "$guide_dir/mnist"
+printf 'FedProx exit: %s\n' "$?"
+```
+
+Expect exit `0` for each. The commands print little to the terminal because the runner puts FLUKE's output in each run's `run.log`. Each output directory should also contain `result.json`. The two calls start fresh Python processes; sharing only the MNIST cache is intentional. A cached run took about four seconds per algorithm on the machine used for the 2026-10-07 proof; this is an observation, not a timeout or accuracy target.
+
+#### 3. Check the result and readable log
+
+```sh
+rg -n 'Round: 1|Round: 2|Training completed' \
+  "$guide_dir/fedavg/run.log" "$guide_dir/fedprox/run.log"
+
+uv run --locked --extra runner python - "$guide_dir" <<'PY'
+import json
+import math
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for algorithm in ("fedavg", "fedprox"):
+    result = json.loads((root / algorithm / "result.json").read_text())
+    assert result["algorithm"] == algorithm
+    assert [item["round"] for item in result["rounds"]] == [1, 2]
+    assert all(
+        isinstance(item["accuracy"], (int, float))
+        and math.isfinite(item["accuracy"])
+        and 0 <= item["accuracy"] <= 1
+        for item in result["rounds"]
+    )
+    print(algorithm, result["rounds"])
+PY
+```
+
+Expect two round headings and the completion line in each log, then one printed list of two valid accuracy records per algorithm. The JSON parser and assertions catch a missing file, malformed JSON, missing round, wrong algorithm, or invalid accuracy. Do not compare accuracy with the example values above: training-library or hardware differences can change the numbers.
+
+#### 4. Prove invalid input fails and clears a stale result
+
+```sh
+printf '%s\n' '{"algorithm":"unknown"}' > "$guide_dir/invalid.json"
+mkdir -p "$guide_dir/invalid"
+printf '%s\n' '{"stale":true}' > "$guide_dir/invalid/result.json"
+
+if uv run --locked --extra runner python -m fluke_backend.runner_cli \
+  "$guide_dir/invalid.json" "$guide_dir/invalid" "$guide_dir/mnist"; then
+  printf 'FAIL: invalid configuration was accepted\n'
+else
+  printf 'Expected nonzero exit: %s\n' "$?"
+fi
+rg -n 'Runner failed|algorithm' "$guide_dir/invalid/run.log"
+test ! -e "$guide_dir/invalid/result.json"
+```
+
+Expect a nonzero exit, a validation diagnostic naming `algorithm`, and no `result.json` despite the file placed there before the attempt. `test ! -e` prints nothing when that last condition holds. [test_runner.py](../backend/tests/test_runner.py) also checks invalid client/round/epoch counts, FedAvg `mu`, nonpositive or nonfinite FedProx `mu`, and extra dataset or path fields. Those values must be rejected before FLUKE is imported.
+
+#### 5. Prove an execution failure leaves a diagnostic log, not a result
+
+Give FLUKE a regular file where it expects a dataset directory. This causes a real initialization failure without altering the successful run directories:
+
+```sh
+printf '%s\n' 'not a directory' > "$guide_dir/not-a-directory"
+if uv run --locked --extra runner python -m fluke_backend.runner_cli \
+  "$guide_dir/fedavg.json" "$guide_dir/failure" "$guide_dir/not-a-directory"; then
+  printf 'FAIL: execution failure was accepted\n'
+else
+  printf 'Expected nonzero exit: %s\n' "$?"
+fi
+rg -n 'Runner failed|NotADirectoryError' "$guide_dir/failure/run.log"
+test ! -e "$guide_dir/failure/result.json"
+```
+
+Expect a nonzero exit, `NotADirectoryError` in the traceback, and no result file. A zero exit by itself never proves success: `RoundResults` also requires every requested round, a `finished` event without interruption, and a finite global accuracy for each round. The focused unit tests simulate short, interrupted, duplicate-final-evaluation, and invalid-accuracy event sequences without retraining MNIST.
+
+#### 6. Run the automated checks
+
+For the runner ticket alone, with the optional extra installed:
+
+```sh
+uv run --locked --extra runner pytest -q -rs tests/test_runner.py
+uv run --locked --extra runner ruff check .
+uv run --locked --extra runner ruff format --check .
+uv build
+```
+
+The focused suite checks the input mapping and result rules, runs a bad JSON subprocess, and triggers one real FLUKE initialization failure. It passed **23 tests** on 2026-10-07; confirm your pytest summary has no skipped runner test. The latter three commands check Python lint, formatting, and the package build; they do not run training.
+
+To check the entire backend, first use the Milestone A setup above to start local PostgreSQL and configure `FLUKE_TEST_ADMIN_URL` in ignored `.env`. Then run:
+
+```sh
+uv run --locked --extra runner pytest -q -rs
+uv run --locked --extra runner alembic check
+```
+
+The 2026-10-07 full check passed **68 tests** with PostgreSQL and the runner extra available. Read the pytest summary: a skipped PostgreSQL test means the database behavior was not verified, and a skipped runner test means the extra was not available. MVP-02 changes no database schema, so Alembic should report `No new upgrade operations detected`. A normal `uv sync --locked` later returns the environment to the lightweight API install. Keep `$guide_dir` until you have inspected its logs; the directory remains ignored by Git.
