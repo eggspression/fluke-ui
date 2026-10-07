@@ -1,8 +1,9 @@
 # FLUKE backend
 
-BE-01 provides an installable API package, environment validation, and
-`GET /health/live`. Database access/migrations begin in BE-02; authentication,
-worker execution, and training are later tickets. Liveness is not readiness.
+Milestone A (BE-01–04) provides an installable API, PostgreSQL persistence,
+reversible migrations, health endpoints, operator account management, and
+one-hour JWT login. Experiment resources, worker execution, and training are
+later tickets.
 
 ## Requirements
 
@@ -34,18 +35,57 @@ port forwarding, and named-volume persistence across container recreation all pa
 Generate a local password using `openssl rand -hex 24`. Put the result in
 `POSTGRES_PASSWORD` in `.env`, and set `FLUKE_DATABASE_URL` to
 `postgresql://fluke:<that-password>@127.0.0.1:5432/fluke`.
+Generate a separate signing secret with `openssl rand -hex 32` and put it in
+`FLUKE_JWT_SECRET`. The API and account commands require both values.
 Keep `.env` private; it is ignored. Blank or invalid database URLs stop API
-startup with a validation error naming `database_url`. Environment variables
+startup with a validation error naming `database_url`; a missing or short signing
+secret stops startup with an error naming `jwt_secret`. Environment variables
 override `.env`; importing the application does not read settings or connect.
+For a separate frontend dev server, set `FLUKE_DEVELOPMENT_ORIGINS` to a JSON
+list of exact origins, such as `["http://localhost:4200"]`. Its default is empty.
 
 ```sh
 docker compose up -d --wait postgres
+uv run --locked alembic upgrade head
 uv run --locked uvicorn fluke_backend.app:create_app --factory --reload
 ```
 
-Visit <http://127.0.0.1:8000/health/live> for `{"status":"ok"}` and
-<http://127.0.0.1:8000/docs> for generated API documentation. Database availability
-does not affect liveness. No tables are created by startup or import.
+Visit <http://127.0.0.1:8000/health/live> for database-independent liveness,
+<http://127.0.0.1:8000/health/ready> for database and migration readiness, and
+<http://127.0.0.1:8000/docs> for generated API documentation. Readiness returns
+503 when PostgreSQL is unavailable, the schema is absent, or its migration
+revision differs. Import and startup do not connect to PostgreSQL or create tables;
+only the explicit Alembic command changes the schema.
+
+## Operator accounts
+
+After migrating the database, run these commands from `backend/`:
+
+```sh
+uv run --locked fluke-admin create-user --email researcher@example.com
+uv run --locked fluke-admin reset-password --email researcher@example.com
+uv run --locked fluke-admin deactivate-user --email researcher@example.com
+```
+
+Create and reset prompt for the password with terminal echo disabled. The CLI
+refuses to read a password if a secure terminal prompt is unavailable. There is
+no password command-line argument; CLI output contains only the normalized email
+and a status. Email addresses are validated and casefolded for uniqueness.
+Passwords are stored as Argon2id hashes. Password reset changes future login credentials but does not invalidate an
+already issued token. Deactivated accounts cannot log in or use an existing
+token because authenticated requests reload the active user.
+
+## API authentication
+
+`POST /api/v1/auth/login` accepts JSON `email` and `password` and returns a
+one-hour signed bearer token, its UTC expiry, and public user identity. Send
+`Authorization: Bearer <token>` to `GET /api/v1/auth/me`. There is no server
+logout route or refresh token; Angular will hold the token in memory and discard
+it on logout. Invalid credentials, invalid or expired tokens, and inactive
+accounts return a generic `401`. Password reset does not revoke an issued token;
+it remains usable until expiry unless the account is deactivated. Tokens issued
+before MVP-01, which contain a session ID, are rejected. HTTP and validation
+errors use FastAPI's standard `detail` field.
 
 `docker compose down` stops the development database and retains its named volume.
 The configured password initializes a new volume; changing `.env` does not change
@@ -79,15 +119,43 @@ uv run --locked ruff check .
 uv run --locked ruff format --check .
 ```
 
-Tests use isolated settings and require neither PostgreSQL nor training packages.
-There is no numeric coverage threshold yet; the BE-01 acceptance behaviors are
-covered explicitly. Future transactional tests must use PostgreSQL, not SQLite.
+Unit tests use isolated settings and require neither PostgreSQL nor training
+packages. PostgreSQL integration tests use a new database per test and drop it
+afterward. To run them, set `FLUKE_TEST_ADMIN_URL` in ignored `.env` to a **local**
+maintenance URL such as `postgresql://fluke:<password>@127.0.0.1:5432/postgres`.
+Use the same password from `POSTGRES_PASSWORD`. The fixture rejects remote hosts
+and URLs pointing at the application database. Do not add URL query parameters:
+the fixture rejects them because PostgreSQL connection options can override the
+host or database name. The fixture never migrates or deletes the
+configured application database. Without this URL, PostgreSQL tests report
+explicit skips. With the URL set, connection errors fail the suite. Use
+`uv run --locked pytest -m postgres` to run only database tests and
+`uv run --locked pytest -m 'not postgres'` for only unit tests.
 
-Generate the tracked OpenAPI snapshot from the application factory:
+Alembic migrations live in `backend/migrations/`. `uv run --locked alembic current`
+shows the database revision. `uv run --locked alembic check` compares ORM metadata
+with the applied schema. The first migration created `users` and `sessions`; MVP-01 adds a second
+migration that drops `sessions` while preserving users. The current schema has
+UUID user keys and timezone-aware timestamps. SQLAlchemy sessions commit when
+their transaction block succeeds and roll back on errors. Revision compatibility
+is checked on every readiness request.
 
-```sh
-FLUKE_DATABASE_URL=postgresql://localhost/schema uv run --locked python -c 'import json; from pathlib import Path; from fluke_backend.app import create_app; Path("openapi.json").write_text(json.dumps(create_app().openapi(), indent=2) + "\n")'
-```
+No numeric coverage threshold is configured yet; Milestone A acceptance
+behaviors are covered explicitly.
+
+**BE-02 verification (2026-10-06):** All 27 tests pass with the local PostgreSQL
+service, including upgrade/downgrade/reapply, rollback, and readiness tests.
+`ruff check`, `ruff format --check`, `uv build`, `alembic current`, and
+`alembic check` pass. The local development database is at revision
+`20261006_0001`.
+
+**MVP-01 verification (2026-10-07):** All 45 tests pass against local PostgreSQL,
+including operator commands, one-hour tokens, migration preservation, reset and
+deactivation behavior, invalid tokens, and CORS. Ruff and the Alembic schema
+check pass. The upstream Starlette/HTTPX deprecation warning remains.
+
+FastAPI generates the current OpenAPI schema at `/openapi.json` when the API runs.
+No generated schema file is tracked.
 
 For a clean install check, use a new temporary environment without altering `.venv`:
 
@@ -99,14 +167,17 @@ UV_PROJECT_ENVIRONMENT="$smoke_dir/venv" uv run --locked --no-editable pytest
 
 ## Dependency boundaries
 
-Base dependencies are FastAPI, Pydantic, Pydantic Settings, and Uvicorn. The `dev`
+Base dependencies are FastAPI, Pydantic, Pydantic Settings, Uvicorn, SQLAlchemy,
+Alembic, psycopg, Argon2, email-validator, and PyJWT. The `dev`
 group adds pytest, HTTPX, and Ruff. The optional `runner` extra is reserved and
-currently empty; BE-14 adds the pinned FLUKE stack. Installing it today adds no
-training functionality. Neither the API nor its tests need FLUKE or PyTorch.
-SQLAlchemy, Alembic, and the PostgreSQL driver will be added with BE-02.
+currently empty; MVP-02 will add the pinned FLUKE stack for a real CPU proof.
+Installing it today adds no training functionality. Neither the API nor its tests
+need FLUKE or PyTorch.
+These dependencies do not import FLUKE or PyTorch.
 
-Domain packages (`auth`, `catalog`, `experiments`, `runs`, `worker`, `runner`, and
-`artifacts`) will be introduced with their owning tickets, with matching tests.
+The MVP will add experiment, run, worker, and runner code only when those
+responsibilities are implemented; the active scope is in
+[TICKETS.md](../docs/TICKETS.md).
 
 If uv's normal cache is unavailable in a restricted workspace, set
 `UV_CACHE_DIR` and `UV_PYTHON_INSTALL_DIR` to writable, ignored local directories.
