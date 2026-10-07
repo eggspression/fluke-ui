@@ -1,15 +1,17 @@
 # Backend code walkthrough — completed tickets
 
-This document explains **implemented code only**. As checked on **2026-10-07**, BE-01–04 and the MVP-01 auth simplification are complete. The [roadmap](TICKETS.md) remains the source for pending tickets and completion criteria; [BACKEND.md](BACKEND.md) describes the target architecture, [backend/README.md](../backend/README.md) contains runnable setup commands, and [CONTEXT.MD](../CONTEXT.MD) is the next-session handoff. Recheck source and tests if you read this after the snapshot date.
+This document explains **implemented code only**. As checked on **2026-10-07**, BE-01–04, the MVP-01 auth simplification, and the MVP-02 FLUKE subprocess proof are complete. The [roadmap](TICKETS.md) remains the source for pending tickets and completion criteria; [BACKEND.md](BACKEND.md) describes the target architecture, [backend/README.md](../backend/README.md) contains runnable setup commands, and [CONTEXT.MD](../CONTEXT.MD) is the next-session handoff. Recheck source and tests if you read this after the snapshot date.
 
 ## Start with the part that runs now
 
-The current backend can answer a health request, connect to a migrated PostgreSQL database, let an operator create an account, and let that user log in and inspect their identity. Client logout discards the token; there is no server logout route. It has no experiment table, run queue, worker, runner, Angular source, or FLUKE integration yet.
+The current backend can answer a health request, connect to a migrated PostgreSQL database, let an operator create an account, and let that user log in and inspect their identity. Client logout discards the token; there is no server logout route. A separate CLI runner can execute FedAvg or FedProx in its own process. There is no experiment table, run queue, worker, or Angular source yet.
 
 ```text
 Operator CLI ── create/reset/deactivate ─┐
                                         ▼
 HTTP client ── login/me ── FastAPI ── PostgreSQL users
+
+JSON snapshot ── separate runner process ── FLUKE ── result.json + run.log
 ```
 
 There are four useful layers to recognize. **Settings** reads and validates configuration. The **API** handles HTTP requests and responses. A **service** such as `AccountService` or `TokenService` contains the behavior. **Models** map Python objects to PostgreSQL rows. A **transaction** is the database boundary: its changes commit together, or roll back together if an error occurs. A **migration** changes the database schema; defining a SQLAlchemy model alone does not create its table.
@@ -22,7 +24,7 @@ Milestone A is the runnable foundation. Each subsection below follows one behavi
 
 ### BE-01 — Reproducible backend setup
 
-**What exists:** [pyproject.toml](../backend/pyproject.toml) declares Python 3.11, the `fluke-backend` package, base dependencies, and the `fluke-admin` entry point. [uv.lock](../backend/uv.lock) fixes the resolved dependency set so a fresh install does not silently choose newer versions. The optional `runner` extra is empty today: installing the API does not install FLUKE or PyTorch. [compose.yaml](../backend/compose.yaml) starts PostgreSQL 17, binds its port to `127.0.0.1`, and keeps data in a named volume. [`.env.example`](../backend/.env.example) lists variable names but contains no working credentials; the real `.env` is ignored by Git.
+**What exists:** [pyproject.toml](../backend/pyproject.toml) declares Python 3.11, the `fluke-backend` package, base dependencies, and the `fluke-admin` entry point. [uv.lock](../backend/uv.lock) fixes the resolved dependency set so a fresh install does not silently choose newer versions. The optional `runner` extra added in MVP-02 installs FLUKE and PyTorch; a base API install still omits them. [compose.yaml](../backend/compose.yaml) starts PostgreSQL 17, binds its port to `127.0.0.1`, and keeps data in a named volume. [`.env.example`](../backend/.env.example) lists variable names but contains no working credentials; the real `.env` is ignored by Git.
 
 **Trace a request, step by step:**
 
@@ -231,4 +233,28 @@ curl -i -X OPTIONS http://127.0.0.1:8000/api/v1/auth/login \
 
 The first response should include `Access-Control-Allow-Origin: http://localhost:4200`. The second should return `400` without an allow-origin header. [test_auth_api.py](../backend/tests/test_auth_api.py) checks both cases. CORS controls browser access to responses; it does not replace JWT authentication.
 
-Stop Uvicorn with `Ctrl+C`. `docker compose down` stops PostgreSQL but retains its named volume. Avoid `docker compose down -v` if you want to keep local users. Milestone A ends here: experiment endpoints, FLUKE execution, a worker, and Angular are still future tickets.
+Stop Uvicorn with `Ctrl+C`. `docker compose down` stops PostgreSQL but retains its named volume. Avoid `docker compose down -v` if you want to keep local users. Milestone A ends here; the separate MVP-02 runner is explained next.
+
+## MVP-02 — Two real FLUKE CPU proofs (implemented)
+
+**What exists:** [runner.py](../backend/src/fluke_backend/runner.py) validates the small JSON snapshot, maps it to fixed MNIST/IID/CPU settings, collects global accuracy, and writes a complete result file. [runner_cli.py](../backend/src/fluke_backend/runner_cli.py) is the subprocess entry point. The optional `runner` dependency group pins FLUKE to revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`; a normal API install still omits FLUKE and PyTorch. There are no runner HTTP routes or database writes yet.
+
+**Trace one run, step by step:**
+
+1. A trusted caller runs `python -m fluke_backend.runner_cli <config.json> <output-dir> <dataset-dir>` in a fresh process. The JSON contains only `algorithm`, `n_clients`, `n_rounds`, `local_epochs`, and optional FedProx `mu`. `RunConfig` rejects unknown fields, out-of-range values, noninteger counts, nonfinite `mu`, and any supplied `mu` for FedAvg. Paths are command arguments chosen by the caller, never JSON fields from a user.
+2. The CLI creates the output directory, removes a result file left by an earlier attempt, and redirects stdout/stderr to `run.log`. Only after validating JSON does it import FLUKE and PyTorch. It maps the snapshot to `MNIST_2NN`, IID, CPU, seed 42, all clients participating, one evaluation per round, and `sampling_perc: 0.01`. The dataset cache is a caller-supplied directory; FLUKE downloads the full MNIST files on the first run, then samples training and evaluation through its data splitter.
+3. `execute()` follows FLUKE's public construction path: `Configuration.from_dict`, `FlukeENV.configure`, `Datasets.get`, `DataSplitter`, `ClassificationEval`, `FedAVG` or `FedProx`, `set_callbacks`, and `algorithm.run`. It does not call the private CLI function `_run_federation()`. A new process matters because `FlukeENV` is process-global state.
+4. `RoundResults` receives `server_evaluation`, `end_round`, `interrupted`, `early_stop`, and `finished` observer events. It keeps global accuracy only for rounds that ended, ignores FLUKE's repeated final evaluation, and requires exactly the requested rounds with finite accuracy from 0 to 1. FLUKE can report `finished` after an interruption, so that event alone is insufficient.
+5. Only after validation does `write_result()` publish `result.json` by renaming a temporary file. Exceptions return a nonzero exit and a traceback in `run.log`. The future worker must also check process exit and parse the result before it marks a run complete.
+
+Successful `result.json` has this shape:
+
+```json
+{"algorithm":"fedavg","rounds":[{"round":1,"accuracy":0.17188},{"round":2,"accuracy":0.125}]}
+```
+
+Those numbers are one observed proof, not target accuracy. With two clients, two rounds, one local epoch, and the 1% sample on this Mac, cached-dataset reruns took 3.98 seconds for FedAvg and 4.16 seconds for FedProx. The first run additionally downloaded approximately 64 MB of MNIST data and initialized the training stack; first-run time depends on network and cache state.
+
+**Follow it yourself:** Run the [MVP-02 commands](../backend/README.md) from `backend/`. Use separate output directories for FedAvg and FedProx; inspect each `result.json` and `run.log`. A configuration such as `{"algorithm":"unknown"}` must exit nonzero, log a validation error, and leave no result. For an execution failure, pass a regular file as `<dataset-dir>`; FLUKE raises `NotADirectoryError`, the log has a traceback, and no result is written. These demonstrations do not require PostgreSQL or the API.
+
+**Automated checks:** [test_runner.py](../backend/tests/test_runner.py) covers fixed settings, invalid choices, complete/short/interrupted results, nonfinite accuracy, stale-result removal, and a real initialization failure when the runner extra is installed. `uv run --locked --extra runner pytest -q -rs` passed **68 tests** with disposable PostgreSQL enabled. Ruff lint/format, `uv build`, and `alembic check` passed. The base install omits FLUKE; its suite skips the one optional runner integration test. Generated datasets, logs, and result files stay under ignored `backend/artifacts/`.

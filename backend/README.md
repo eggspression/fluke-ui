@@ -2,8 +2,8 @@
 
 Milestone A (BE-01–04) provides an installable API, PostgreSQL persistence,
 reversible migrations, health endpoints, operator account management, and
-one-hour JWT login. Experiment resources, worker execution, and training are
-later tickets.
+one-hour JWT login. MVP-02 adds a separate FLUKE CPU runner. Experiment
+resources and worker execution are later tickets.
 
 ## Requirements
 
@@ -111,6 +111,43 @@ The token lasts one hour. Swagger's **Logout** clears its client-side token;
 there is no `/api/v1/auth/logout` route. Keep real passwords and tokens out of
 screenshots and shared logs.
 
+## MVP-02: run FedAvg and FedProx directly
+
+Install the optional training stack from `backend/`. The lockfile pins FLUKE
+revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`. The first install
+downloads PyTorch and other training dependencies; the first run downloads
+approximately 64 MB of MNIST files. Neither the API nor PostgreSQL is required
+for these direct proofs.
+
+```sh
+uv sync --locked --extra runner
+mkdir -p artifacts/mvp02
+cat > artifacts/mvp02/fedavg.json <<'JSON'
+{"algorithm":"fedavg","n_clients":2,"n_rounds":2,"local_epochs":1}
+JSON
+cat > artifacts/mvp02/fedprox.json <<'JSON'
+{"algorithm":"fedprox","n_clients":2,"n_rounds":2,"local_epochs":1,"mu":0.3}
+JSON
+uv run --locked --extra runner python -m fluke_backend.runner_cli artifacts/mvp02/fedavg.json artifacts/mvp02/fedavg artifacts/mvp02/mnist
+uv run --locked --extra runner python -m fluke_backend.runner_cli artifacts/mvp02/fedprox.json artifacts/mvp02/fedprox artifacts/mvp02/mnist
+cat artifacts/mvp02/fedavg/result.json
+cat artifacts/mvp02/fedprox/result.json
+```
+
+Each output directory contains `run.log` and, only after successful training,
+`result.json` with two ordered round/accuracy entries. The CLI writes its
+console output and any traceback to `run.log`; it exits nonzero on bad input,
+initialization or training failure, interrupted or short runs, or a result
+write failure. It removes a stale result before each attempt. The 1% sample
+completed in about four seconds per algorithm on this Mac after dataset
+download. Paths above are local, server-owned arguments; the JSON snapshot
+cannot select datasets, code imports, or output paths. `artifacts/` is ignored
+by Git.
+
+Run the optional failure check with
+`uv run --locked --extra runner pytest -q -m runner`; no real training succeeds in this test. The full base suite skips
+this optional test when FLUKE is absent.
+
 `docker compose down` stops the development database and retains its named volume.
 The configured password initializes a new volume; changing `.env` does not change
 the password of an existing database. The database port is bound to localhost.
@@ -193,13 +230,11 @@ UV_PROJECT_ENVIRONMENT="$smoke_dir/venv" uv run --locked --no-editable pytest
 
 Base dependencies are FastAPI, Pydantic, Pydantic Settings, Uvicorn, SQLAlchemy,
 Alembic, psycopg, Argon2, email-validator, and PyJWT. The `dev`
-group adds pytest, HTTPX, and Ruff. The optional `runner` extra is reserved and
-currently empty; MVP-02 will add the pinned FLUKE stack for a real CPU proof.
-Installing it today adds no training functionality. Neither the API nor its tests
-need FLUKE or PyTorch.
-These dependencies do not import FLUKE or PyTorch.
+group adds pytest, HTTPX, and Ruff. The optional `runner` extra installs the
+pinned FLUKE stack for direct CPU runs. The ordinary API install and API imports
+do not need FLUKE or PyTorch.
 
-The MVP will add experiment, run, worker, and runner code only when those
+The MVP will add experiment, run, and worker code only when those
 responsibilities are implemented; the active scope is in
 [TICKETS.md](../docs/TICKETS.md).
 

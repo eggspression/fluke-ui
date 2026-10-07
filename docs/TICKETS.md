@@ -2,7 +2,7 @@
 
 This is the **active** roadmap for a 3–4 week university project. The goal is one understandable end-to-end demonstration: log in, configure FedAvg or FedProx on MNIST, save an experiment, run it on CPU, and inspect its status, logs, accuracy, and history in Angular. [BACKEND.md](BACKEND.md) defines the small technical contract. [CONTEXT.MD](../CONTEXT.MD) is the next-thread handoff.
 
-BE-01–04 are implemented and MVP-01 has simplified their authentication design; [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) explains the **current** code. The former BE-05–20 roadmap was superseded after Milestone B was reverted. Its implementation is not in the working tree. Git history retains it if needed, but it is not the MVP checklist.
+BE-01–04, MVP-01, and MVP-02 are implemented; [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) explains the **current** code. The former BE-05–20 roadmap was superseded after Milestone B was reverted. Its implementation is not in the working tree. Git history retains it if needed, but it is not the MVP checklist.
 
 Complete tickets in order. Check a box only after its behavior works, relevant tests pass, and this roadmap and the implementation guide reflect what actually shipped. Prefer a small function and a focused test over a framework of services or schemas for hypothetical future features. Run the backend suite and Ruff before marking a backend ticket done. No secrets, datasets, run logs, or generated models belong in Git.
 
@@ -22,7 +22,7 @@ Remove the custom request-ID/error-envelope middleware and the tracked `backend/
 
 ## MVP-02 — Prove the FLUKE run before building management screens
 
-- [ ] **Not started.** Timebox: about two days for the first proof; report a blocker if either algorithm cannot complete instead of building around an unproved runner.
+- [x] **Implemented and verified, 2026-10-07.** The runner uses FLUKE revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`, a 1% MNIST sample, and fresh CPU subprocesses. Two clients, two rounds, and one local epoch complete for both algorithms. Cached-dataset runs took 3.98 seconds (FedAvg) and 4.16 seconds (FedProx) on this Mac. Invalid configuration and deliberate dataset-path failure exit nonzero with a diagnostic log and no result. Continue with MVP-03.
 
 Pin FLUKE to inspected revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`. Build the smallest isolated runner using FLUKE's public construction and observer APIs, following its CLI as a reference without calling private `_run_federation()`. Prove two-round CPU runs for FedAvg and FedProx on a small MNIST sample, using `MNIST_2NN` and IID. Capture global accuracy for each round and a readable log. Use the same inputs the future worker will pass. FLUKE's CLI catches some exceptions, so a successful process exit alone cannot count as a successful experiment.
 

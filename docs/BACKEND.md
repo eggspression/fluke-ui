@@ -1,6 +1,6 @@
 # FLUKE UI backend — small MVP design
 
-**Planning status, 2026-10-07:** This is the target for the 3–4 week university MVP, not a claim that all these features exist. BE-01–04 and the MVP-01 auth simplification are implemented today. See [TICKETS.md](TICKETS.md) for work order, [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for shipped code, and [CONTEXT.MD](../CONTEXT.MD) for a new-thread handoff.
+**Planning status, 2026-10-07:** This is the target for the 3–4 week university MVP, not a claim that all these features exist. BE-01–04, MVP-01 authentication, and the MVP-02 subprocess runner are implemented today. Experiment persistence, the worker, and Angular remain planned. See [TICKETS.md](TICKETS.md) for work order, [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for shipped code, and [CONTEXT.MD](../CONTEXT.MD) for a new-thread handoff.
 
 ## What the demo must do
 
@@ -38,7 +38,7 @@ The UI form and API accept a deliberately small configuration:
 | `local_epochs` | integer 1–3, default 1 |
 | `mu` | positive number for FedProx, default 0.3; rejected for FedAvg |
 
-The server maps these values through two readable FLUKE templates. Dataset MNIST, IID distribution, `MNIST_2NN`, CPU, seed 42, and participation fraction 1.0 are fixed. Use a small real MNIST sample so a two-round demonstration completes promptly; MVP-02 determines and records a proven sample fraction. Dataset paths, logger names, output locations, and Python import strings are never accepted from a request. There is no generic catalog registry or separate validation endpoint. The FastAPI request model validates the form when an experiment is saved.
+The server maps these values through two readable FLUKE templates. Dataset MNIST, IID distribution, `MNIST_2NN`, CPU, seed 42, and participation fraction 1.0 are fixed. MVP-02 proved a 1% MNIST sample (`sampling_perc: 0.01`) for two-round runs of both algorithms. Dataset paths, logger names, output locations, and Python import strings are never accepted from a request. There is no generic catalog registry or separate validation endpoint. The FastAPI request model validates the form when an experiment is saved.
 
 An experiment stores its owner, name, configuration, and timestamps. It can be edited until its first run is created. Once a run exists, a `PATCH` returns `409`, so earlier work stays understandable. Each run stores a copy of the configuration, experiment/owner IDs, status, timestamps, and a short failure message. Store logs and metrics in a run directory selected from the server-generated run ID. Do not store absolute user-supplied paths in the database.
 
@@ -58,7 +58,7 @@ All experiment/run/log lookups filter by the authenticated owner. Missing or som
 
 ## Runner and failure rules
 
-Pin the FLUKE integration to revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`. Follow its public construction and observer APIs; do not call private `_run_federation()`. The existing CLI catches some exceptions, so its exit code alone is not a valid success signal. The runner explicitly writes a small result file with round/accuracy values only after all requested rounds complete. The worker marks completion only if the runner exits zero **and** that file parses and shows the expected rounds. Capture stdout and stderr as a log; do not parse console text for metrics. On ordinary initialization/training/result-write failure, retain the log and mark `FAILED`.
+The MVP-02 runner pins FLUKE to revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`. It uses public construction and observer APIs, without calling private `_run_federation()`. FLUKE can swallow an interruption and report `finished`, so the runner also checks that every requested round ended and has finite global accuracy. It writes `result.json` only after those checks and keeps stdout, stderr, and tracebacks in `run.log`. The planned worker will mark completion only if the runner exits zero **and** that file parses and shows the expected rounds. On ordinary initialization/training/result-write failure, it will retain the log and mark `FAILED`.
 
 The worker is a single local process. It commits state before waiting for training, so PostgreSQL transactions do not span a run. It passes a minimal environment to the runner without JWT or database credentials. On startup, an unresolved `RUNNING` row is an operator-visible stop condition; the MVP does not automatically signal unknown processes or resume a crashed worker. This is a known local-demo limitation, not a hidden recovery promise.
 
