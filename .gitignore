@@ -23,4 +23,4 @@ logs/
 *.pth
 *.ckpt
 .superpowers/
-docs/
+.worktrees/

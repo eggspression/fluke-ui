@@ -9,6 +9,16 @@ def test_database_url_is_required():
         Settings()
 
 
+def test_signing_secret_is_required_and_validated(monkeypatch):
+    monkeypatch.setenv("FLUKE_DATABASE_URL", "postgresql://localhost/test")
+    monkeypatch.delenv("FLUKE_JWT_SECRET")
+    with pytest.raises(ValidationError, match="jwt_secret"):
+        Settings()
+    monkeypatch.setenv("FLUKE_JWT_SECRET", "short")
+    with pytest.raises(ValidationError, match="jwt_secret"):
+        Settings()
+
+
 @pytest.mark.parametrize("url", ["", "invalid", "sqlite:///local.db", "postgresql://"])
 def test_rejects_invalid_or_non_postgresql_database_url(monkeypatch, url):
     monkeypatch.setenv("FLUKE_DATABASE_URL", url)

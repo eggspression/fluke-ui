@@ -17,12 +17,24 @@ def test_liveness_works_without_database(monkeypatch):
     assert response.json() == {"status": "ok"}
 
 
+def test_readiness_reports_unavailable_database_without_exposing_credentials(monkeypatch):
+    monkeypatch.setenv(
+        "FLUKE_DATABASE_URL", "postgresql://user:private-password@127.0.0.1:1/unavailable"
+    )
+    with TestClient(create_app()) as client:
+        response = client.get("/health/ready")
+        liveness = client.get("/health/live")
+    assert response.status_code == 503
+    assert "private-password" not in response.text
+    assert liveness.status_code == 200
+
+
 def test_startup_rejects_missing_settings():
     with pytest.raises(ValidationError, match="database_url"):
         create_app()
 
 
-def test_import_and_liveness_do_not_load_training_or_database_libraries():
+def test_import_and_liveness_do_not_connect_or_load_training_libraries():
     result = subprocess.run(
         [
             sys.executable,
@@ -33,10 +45,14 @@ import sys
 
 class BoundaryGuard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'fluke', 'torch', 'sqlalchemy', 'psycopg'}:
+        if fullname.split('.')[0] in {'fluke', 'torch'}:
             raise AssertionError(f'Forbidden dependency: {fullname}')
 
 sys.meta_path.insert(0, BoundaryGuard())
+import psycopg
+def forbidden_connection(*args, **kwargs):
+    raise AssertionError('Database connection during import or liveness')
+psycopg.connect = forbidden_connection
 from fluke_backend.app import create_app
 # Import must succeed before any configuration is supplied.
 import os
