@@ -87,6 +87,30 @@ it remains usable until expiry unless the account is deactivated. Tokens issued
 before MVP-01, which contain a session ID, are rejected. HTTP and validation
 errors use FastAPI's standard `detail` field.
 
+## Try the API in Swagger UI
+
+With PostgreSQL migrated and the API running, open
+<http://127.0.0.1:8000/docs>. Create an account with `fluke-admin create-user`
+first; there is no registration endpoint.
+
+1. Expand **POST /api/v1/auth/login**, click **Try it out**, and enter the
+   account email and password in the JSON body. Click **Execute**. A successful
+   response is `200` and includes `access_token`, `expires_at`, and the user ID.
+2. Copy only the `access_token` value. Click **Authorize** at the top of Swagger
+   UI, paste the token without the `Bearer ` prefix, and confirm. Swagger adds
+   the authorization header to protected requests.
+3. Expand **GET /api/v1/auth/me** and click **Try it out → Execute**. Expect
+   `200` with the same user ID and email. Use **Authorize → Logout** to clear
+   Swagger's token from that browser tab.
+4. Try **GET /health/live** and **GET /health/ready** without authorization;
+   both return `200` when the API and migrated database are ready. A wrong
+   password or invalid token returns `401`; a login body without `password`
+   returns FastAPI's `422` validation response.
+
+The token lasts one hour. Swagger's **Logout** clears its client-side token;
+there is no `/api/v1/auth/logout` route. Keep real passwords and tokens out of
+screenshots and shared logs.
+
 `docker compose down` stops the development database and retains its named volume.
 The configured password initializes a new volume; changing `.env` does not change
 the password of an existing database. The database port is bound to localhost.
