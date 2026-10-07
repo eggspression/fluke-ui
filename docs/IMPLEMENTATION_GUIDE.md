@@ -94,3 +94,141 @@ A successful response has this shape (values are placeholders):
 **Trace errors and browser access:** [app.py](../backend/src/fluke_backend/app.py) uses FastAPI's ordinary `detail` responses for HTTP and validation errors. `FLUKE_DEVELOPMENT_ORIGINS` configures exact allowed browser origins; the default list is empty. Cross-origin resource sharing (CORS) decides which browser origins may read responses. It does not authorize data access. There are no experiment or run endpoints yet; owner checks arrive with those resources.
 
 **Follow it yourself:** Read `login()` and `get_current_user()` in [auth/api.py](../backend/src/fluke_backend/auth/api.py), then `TokenService.login()` and `authenticate()` in [auth/tokens.py](../backend/src/fluke_backend/auth/tokens.py). [test_auth_api.py](../backend/tests/test_auth_api.py) covers one-hour claims, `/me`, operator-created users, invalid tokens, reset, deactivation, FastAPI errors, and CORS. Run `uv run --locked pytest -q tests/test_auth_api.py` with disposable PostgreSQL enabled. The live API generates its schema at `/openapi.json`; no schema snapshot is tracked.
+
+## Milestone A — complete test guide
+
+This walkthrough tests **BE-01–04 as they work after MVP-01**. It covers setup, migrations, health, account commands, login, JWT authentication, reset, deactivation, browser access, and the automated checks. Use a throwaway account: deactivation has no reactivation command. The commands below run from `backend/` unless stated otherwise. Keep real passwords and tokens out of shell arguments, screenshots, Git, and shared logs.
+
+### 1. Prepare the local environment
+
+```sh
+cd /Users/eggspression/Documents/code/projects/fluke-ui/backend
+uv python install 3.11
+uv sync --locked
+test -f .env || cp .env.example .env
+chmod 600 .env
+```
+
+On a new setup, generate separate values with `openssl rand -hex 24` and `openssl rand -hex 32`, then edit the ignored `.env`. Set `POSTGRES_PASSWORD` to the first value, `FLUKE_DATABASE_URL` to `postgresql://fluke:<password>@127.0.0.1:5432/fluke`, and `FLUKE_JWT_SECRET` to the second value. For the complete integration suite, also set `FLUKE_TEST_ADMIN_URL` to `postgresql://fluke:<password>@127.0.0.1:5432/postgres`. Replace `<password>` with the same PostgreSQL password, not the JWT secret. The test-admin URL must target the local `postgres` maintenance database, never `fluke`; the fixture creates and drops its own random databases. See [backend/README.md](../backend/README.md) for setup details. Do not overwrite an existing `.env` just to follow this walkthrough.
+
+On this macOS development setup, start Colima if it is stopped. Then start PostgreSQL and apply the current migration:
+
+```sh
+colima start
+docker compose up -d --wait postgres
+uv run --locked alembic upgrade head
+uv run --locked alembic current
+uv run --locked alembic check
+```
+
+If Colima is already running, skip `colima start`. Expect `20261007_0002 (head)` from `alembic current` and `No new upgrade operations detected` from `alembic check`. The current schema has `users` and `alembic_version`, not `sessions`. The automated migration test below proves that upgrading from the earlier revision preserves existing users and that downgrade/reapply works. Do **not** downgrade your application database to test that behavior.
+
+### 2. Start the API and test health
+
+In terminal A, leave the API running:
+
+```sh
+uv run --locked uvicorn fluke_backend.app:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+In terminal B, from `backend/`:
+
+```sh
+curl -i http://127.0.0.1:8000/health/live
+curl -i http://127.0.0.1:8000/health/ready
+curl -I http://127.0.0.1:8000/docs
+curl -I http://127.0.0.1:8000/openapi.json
+```
+
+Expect `200` for all four. Both health responses have `{"status":"ok"}`. `/health/live` only proves the HTTP process is alive; `/health/ready` checks PostgreSQL and migration revision. A missing database or stale schema makes readiness return `503` while liveness stays `200`. The automated tests exercise that failure without disrupting the application database.
+
+### 3. Create a throwaway operator-managed account
+
+In terminal B, choose a unique email and run the interactive command:
+
+```sh
+TEST_EMAIL="milestone-a-$(date +%s)@example.com"
+echo "$TEST_EMAIL"
+uv run --locked fluke-admin create-user --email "$TEST_EMAIL"
+```
+
+Enter a password at the hidden prompt; remember it for the Swagger steps. Expect `Created <normalized email>`. No public sign-up route exists. The command accepts no `--password` argument. Automated account tests also verify email normalization, case-insensitive duplicates, Argon2id hashes, missing users, and refusal of an insecure password prompt.
+
+### 4. Test login and protected requests in Swagger UI
+
+Open <http://127.0.0.1:8000/docs>. Use the printed `TEST_EMAIL` and the password from step 3.
+
+1. Expand **POST /api/v1/auth/login**, click **Try it out**, enter `email` and `password` in the JSON body, then click **Execute**. Expect `200`, `token_type: "bearer"`, a user ID/email, `expires_at` about one hour ahead, and an `access_token`. Do not share the token.
+2. Expand **GET /api/v1/auth/me** before authorizing and execute it. Expect `401` with FastAPI's `detail` field.
+3. Click **Authorize** at the top of Swagger. Paste only the `access_token` value, without `Bearer `. Swagger supplies the prefix. Execute **GET /api/v1/auth/me** again. Expect `200` with the same ID and email from login.
+4. Use **Authorize → Logout** to clear Swagger's token, then execute `/auth/me` again. Expect `401`. This only clears Swagger's copy of the token; it does not revoke the signed token on the server.
+
+Try these error cases in Swagger before resetting the account:
+
+| Request | Expected result |
+|---|---|
+| Login with the correct email and a wrong password | `401`, generic credential error |
+| Login with an unknown email | `401`, same generic credential error |
+| Login JSON without `password` | `422`, FastAPI validation `detail` |
+| `/auth/me` with no token or a fabricated token | `401` |
+| `/api/v1/auth/logout` | Not listed in Swagger; a direct request returns `404` |
+
+Expired, forged, malformed-subject, unknown-user, and older session-based JWTs are checked by [test_auth_api.py](../backend/tests/test_auth_api.py). They are easier and safer to verify with isolated tests than by creating real expired credentials manually.
+
+### 5. Test reset and deactivation
+
+Log in again in Swagger and leave its token authorized. In terminal B, reset the **throwaway** account:
+
+```sh
+uv run --locked fluke-admin reset-password --email "$TEST_EMAIL"
+```
+
+Enter a new password at the hidden prompt. Back in Swagger, `/auth/me` with the **old token** should still return `200`: reset changes future login credentials but does not revoke issued one-hour JWTs. Login with the old password should return `401`; login with the new password should return `200`. Keep or authorize the new token for the next check.
+
+Finally deactivate that test account in terminal B:
+
+```sh
+uv run --locked fluke-admin deactivate-user --email "$TEST_EMAIL"
+```
+
+Expect `Deactivated <email>`. `/auth/me` with either old or new token now returns `401`, and login with the new password also returns `401`. Authentication reloads the user on every protected request and rejects inactive accounts. Do not use a real account for this step; no reactivation command exists.
+
+### 6. Run the automated checks
+
+From `backend/`, with `FLUKE_TEST_ADMIN_URL` configured as in step 1:
+
+```sh
+uv run --locked pytest -q -rs
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked alembic check
+uv build
+```
+
+The full PostgreSQL run currently has **45 passing tests**. Inspect the pytest summary: if integration tests are **skipped**, you have not verified database behavior. The upstream Starlette/HTTPX deprecation warning does not fail the suite. `ruff check` and `ruff format --check` should pass; Alembic should report no pending schema operations; `uv build` should produce a wheel and source distribution.
+
+| Test file | What it proves |
+|---|---|
+| [test_settings.py](../backend/tests/test_settings.py), [test_app.py](../backend/tests/test_app.py) | Required settings, credential-safe errors, liveness/readiness split, and no database connection or FLUKE/PyTorch import during import/liveness. |
+| [test_database.py](../backend/tests/test_database.py), [test_postgres_guard.py](../backend/tests/test_postgres_guard.py) | Current and reversible migrations, existing-user preservation, UTC/UUID records, transaction rollback, readiness, and safe disposable-database targeting. |
+| [test_accounts.py](../backend/tests/test_accounts.py), [test_account_cli.py](../backend/tests/test_account_cli.py) | Argon2id storage, email uniqueness, reset/deactivation, secret-free CLI output, and secure prompts. |
+| [test_auth_api.py](../backend/tests/test_auth_api.py) | Operator-created user login, one-hour JWT, `/me`, generic failures, invalid tokens, reset/deactivation behavior, FastAPI errors, and CORS. |
+
+To focus on one area, run `uv run --locked pytest -q tests/test_auth_api.py` or `uv run --locked pytest -q tests/test_database.py`. The database tests create and remove separate test databases; they do not downgrade or erase the configured application database.
+
+### 7. Optional CORS check and shutdown
+
+For a browser served separately at `http://localhost:4200`, set `FLUKE_DEVELOPMENT_ORIGINS=["http://localhost:4200"]` in `.env` and restart the API. Then run:
+
+```sh
+curl -i -X OPTIONS http://127.0.0.1:8000/api/v1/auth/login \
+  -H 'Origin: http://localhost:4200' \
+  -H 'Access-Control-Request-Method: POST'
+curl -i -X OPTIONS http://127.0.0.1:8000/api/v1/auth/login \
+  -H 'Origin: http://unlisted.example' \
+  -H 'Access-Control-Request-Method: POST'
+```
+
+The first response should include `Access-Control-Allow-Origin: http://localhost:4200`. The second should return `400` without an allow-origin header. [test_auth_api.py](../backend/tests/test_auth_api.py) checks both cases. CORS controls browser access to responses; it does not replace JWT authentication.
+
+Stop Uvicorn with `Ctrl+C`. `docker compose down` stops PostgreSQL but retains its named volume. Avoid `docker compose down -v` if you want to keep local users. Milestone A ends here: experiment endpoints, FLUKE execution, a worker, and Angular are still future tickets.
