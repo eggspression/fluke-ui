@@ -24,8 +24,10 @@ fluke-admin = "fluke_backend.auth.cli:run"
 dev = ["httpx>=0.28,<1", "pytest>=8,<10", "ruff>=0.15,<1"]
 
 [project.optional-dependencies]
-# Populated with the pinned training stack in BE-14; API installs stay lightweight.
-runner = []
+# The API install stays lightweight; MVP-02 opts into the pinned training stack.
+runner = [
+    "fluke-fl",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
@@ -34,7 +36,10 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-config --strict-markers"
-markers = ["postgres: tests requiring a disposable local PostgreSQL database"]
+markers = [
+    "postgres: tests requiring a disposable local PostgreSQL database",
+    "runner: tests requiring the optional FLUKE runner extra",
+]
 
 [tool.ruff]
 target-version = "py311"
@@ -42,3 +47,6 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv.sources]
+fluke-fl = { git = "https://github.com/makgyver/fluke", rev = "37c54630f0b4d9d6164f003cbed0811019acc5e1" }
