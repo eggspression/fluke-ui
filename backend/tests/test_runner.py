@@ -51,6 +51,8 @@ def test_fedprox_snapshot_maps_mu_and_epochs():
         {"algorithm": "fedavg", "mu": None},
         {"algorithm": "fedprox", "mu": 0},
         {"algorithm": "fedprox", "mu": None},
+        {"algorithm": "fedprox", "mu": True},
+        {"algorithm": "fedprox", "mu": "0.3"},
         {"algorithm": "fedavg", "n_clients": 1},
         {"algorithm": "fedavg", "n_clients": 4.0},
         {"algorithm": "fedavg", "n_rounds": 6},

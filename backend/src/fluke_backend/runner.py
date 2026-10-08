@@ -17,7 +17,7 @@ class RunConfig(BaseModel):
     n_clients: int = Field(default=4, ge=2, le=10, strict=True)
     n_rounds: int = Field(default=2, ge=1, le=5, strict=True)
     local_epochs: int = Field(default=1, ge=1, le=3, strict=True)
-    mu: float | None = Field(default=None, gt=0)
+    mu: float | None = Field(default=None, gt=0, strict=True)
 
     @model_validator(mode="after")
     def validate_mu(self) -> "RunConfig":

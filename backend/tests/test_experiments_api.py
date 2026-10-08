@@ -126,6 +126,8 @@ def test_invalid_form_uses_fastapi_validation_errors(api):
         form(mu=0.3),
         form(algorithm="fedprox", mu=0),
         form(algorithm="fedprox", mu=None),
+        form(algorithm="fedprox", mu=True),
+        form(algorithm="fedprox", mu="0.3"),
         form(dataset="private/path"),
     )
     for payload in invalid:
