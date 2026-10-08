@@ -16,10 +16,10 @@ from fluke_backend.settings import Settings
 pytestmark = pytest.mark.postgres
 
 
-def test_migrations_leave_only_users_table(disposable_database, alembic_config):
+def test_migrations_leave_expected_tables(disposable_database, alembic_config):
     command.upgrade(alembic_config, "head")
     inspector = inspect(disposable_database)
-    assert set(inspector.get_table_names()) == {"users", "alembic_version"}
+    assert set(inspector.get_table_names()) == {"users", "experiments", "runs", "alembic_version"}
     assert inspector.get_columns("users")[0]["name"] == "id"
     with disposable_database.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
@@ -33,7 +33,12 @@ def test_migrations_downgrade_and_reapply(disposable_database, alembic_config):
     command.downgrade(alembic_config, "base")
     assert "users" not in inspect(disposable_database).get_table_names()
     command.upgrade(alembic_config, "head")
-    assert set(inspect(disposable_database).get_table_names()) == {"users", "alembic_version"}
+    assert set(inspect(disposable_database).get_table_names()) == {
+        "users",
+        "experiments",
+        "runs",
+        "alembic_version",
+    }
 
 
 def test_session_removal_migration_preserves_existing_users(disposable_database, alembic_config):

@@ -10,6 +10,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from fluke_backend.auth.api import router as auth_router
 from fluke_backend.database import Database
+from fluke_backend.experiments.api import router as experiments_router
 from fluke_backend.settings import Settings
 
 
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(auth_router)
+    app.include_router(experiments_router)
 
     @app.get("/health/live", response_model=LivenessResponse, tags=["health"])
     def liveness() -> LivenessResponse:
