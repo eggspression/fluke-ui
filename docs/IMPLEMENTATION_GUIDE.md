@@ -458,7 +458,154 @@ While authorized as Alice, try separate **POST /api/v1/experiments** requests wi
 
 Use **Authorize → Logout**, then log in as Bob and authorize his token. Bob's experiment list should be empty. Alice's experiment detail, edit, launch, and history URLs should each return `404`; Alice's run detail URL should also return `404`. A completely unknown UUID has the same `404` result. Log out in Swagger and request the experiment list again: expect `401`. This checks the API ownership boundary, not browser filtering.
 
-#### 5. Run automated checks and stop local services
+#### 5. Run one repeatable HTTP smoke test
+
+Keep the API running and open a third terminal in `backend/`. The following script prompts for the two accounts from step 1. It keeps passwords and JWTs in memory, prints neither, and fails immediately if a response or saved value differs from the MVP-03 contract. It creates one experiment and two queued runs in the local development database.
+
+```sh
+uv run --locked python - <<'PY'
+from datetime import UTC, datetime
+from getpass import getpass
+from uuid import UUID, uuid4
+
+import httpx
+
+alice_email = input("Alice email: ").strip()
+alice_password = getpass("Alice password: ")
+bob_email = input("Bob email: ").strip()
+bob_password = getpass("Bob password: ")
+base = "http://127.0.0.1:8000"
+
+
+def expect(response, status, label):
+    assert response.status_code == status, (
+        f"{label}: expected {status}, got {response.status_code}: {response.text}"
+    )
+    print(f"PASS {label}: HTTP {status}")
+    return response.json()
+
+
+with httpx.Client(base_url=base, timeout=10) as client:
+    assert expect(client.get("/health/ready"), 200, "database ready") == {"status": "ok"}
+    expect(client.get("/api/v1/experiments"), 401, "anonymous list denied")
+
+    def login(email, password, label):
+        body = expect(
+            client.post("/api/v1/auth/login", json={"email": email, "password": password}),
+            200,
+            f"login {label}",
+        )
+        return {"Authorization": f"Bearer {body['access_token']}"}
+
+    alice = login(alice_email, alice_password, "Alice")
+    bob = login(bob_email, bob_password, "Bob")
+    name = f"MVP-03 smoke {datetime.now(UTC).isoformat()}"
+    created = expect(
+        client.post("/api/v1/experiments", headers=alice, json={
+            "name": f"  {name}  ", "algorithm": "fedavg"
+        }),
+        201,
+        "create FedAvg experiment",
+    )
+    experiment_id = created["id"]
+    UUID(experiment_id)
+    assert created["name"] == name
+    assert created["config"] == {
+        "algorithm": "fedavg", "n_clients": 4, "n_rounds": 2, "local_epochs": 1
+    }
+    assert created["created_at"] and created["updated_at"]
+    assert expect(
+        client.get(f"/api/v1/experiments/{experiment_id}", headers=alice),
+        200, "read experiment"
+    ) == created
+    listed = expect(client.get("/api/v1/experiments", headers=alice), 200, "list experiments")
+    assert experiment_id in {item["id"] for item in listed}
+
+    replacement = {
+        "name": f"{name} prox", "algorithm": "fedprox", "n_clients": 2,
+        "n_rounds": 2, "local_epochs": 1, "mu": 0.5
+    }
+    edited = expect(
+        client.patch(f"/api/v1/experiments/{experiment_id}", headers=alice, json=replacement),
+        200, "edit before first run"
+    )
+    assert edited["name"] == replacement["name"]
+    assert edited["config"] == {key: value for key, value in replacement.items() if key != "name"}
+
+    first = expect(
+        client.post(f"/api/v1/experiments/{experiment_id}/runs", headers=alice),
+        202, "queue first run"
+    )
+    UUID(first["id"])
+    assert first["experiment_id"] == experiment_id
+    assert first["config"] == edited["config"]
+    assert first["status"] == "QUEUED"
+    assert first["failure_message"] is first["started_at"] is first["finished_at"] is None
+    assert first["created_at"] and first["updated_at"]
+    assert expect(client.get(f"/api/v1/runs/{first['id']}", headers=alice), 200, "read run") == first
+
+    second = expect(
+        client.post(f"/api/v1/experiments/{experiment_id}/runs", headers=alice),
+        202, "queue second run"
+    )
+    assert second["id"] != first["id"] and second["config"] == first["config"]
+    history = expect(
+        client.get(f"/api/v1/experiments/{experiment_id}/runs", headers=alice),
+        200, "run history"
+    )
+    assert [item["id"] for item in history[:2]] == [second["id"], first["id"]]
+    expect(
+        client.patch(f"/api/v1/experiments/{experiment_id}", headers=alice, json=replacement),
+        409, "edit blocked after run"
+    )
+    assert expect(client.get(f"/api/v1/runs/{first['id']}", headers=alice), 200, "snapshot unchanged")["config"] == first["config"]
+
+    invalid_forms = (
+        {"name": " ", "algorithm": "fedavg"},
+        {"name": "Bad algorithm", "algorithm": "other"},
+        {"name": "Bad clients", "algorithm": "fedavg", "n_clients": 1},
+        {"name": "FedAvg mu", "algorithm": "fedavg", "mu": 0.3},
+        {"name": "Boolean mu", "algorithm": "fedprox", "mu": True},
+        {"name": "String mu", "algorithm": "fedprox", "mu": "0.3"},
+        {"name": "User path", "algorithm": "fedavg", "dataset": "/tmp/other"},
+    )
+    for index, payload in enumerate(invalid_forms, 1):
+        body = expect(
+            client.post("/api/v1/experiments", headers=alice, json=payload),
+            422, f"invalid form {index}"
+        )
+        assert isinstance(body["detail"], list)
+
+    bob_list = expect(client.get("/api/v1/experiments", headers=bob), 200, "Bob list")
+    assert experiment_id not in {item["id"] for item in bob_list}
+    for method, path, payload in (
+        ("GET", f"/api/v1/experiments/{experiment_id}", None),
+        ("PATCH", f"/api/v1/experiments/{experiment_id}", replacement),
+        ("POST", f"/api/v1/experiments/{experiment_id}/runs", None),
+        ("GET", f"/api/v1/experiments/{experiment_id}/runs", None),
+        ("GET", f"/api/v1/runs/{first['id']}", None),
+        ("GET", f"/api/v1/runs/{uuid4()}", None),
+    ):
+        expect(client.request(method, path, headers=bob, json=payload), 404, f"Bob {method} denied")
+
+print("MVP-03 HTTP smoke test passed; runs remain QUEUED until MVP-04.")
+PY
+```
+
+Expect a series of `PASS` lines ending with `MVP-03 HTTP smoke test passed`. A failed assertion stops the script at the exact request that disagreed with the guide. If you rerun it, it creates another experiment and two more queued runs; it does not overwrite earlier snapshots. No MNIST download or training should occur.
+
+#### 6. Inspect the stored rows without changing them
+
+This read only query checks the latest smoke runs directly in PostgreSQL. It prints only experiment names, status, and two boolean comparisons; no password hashes or tokens are selected.
+
+```sh
+docker compose exec -T postgres psql -U fluke -d fluke -c \
+  "SELECT e.name, r.status, e.owner_id = r.owner_id AS same_owner, e.config = r.config AS same_config FROM runs AS r JOIN experiments AS e ON e.id = r.experiment_id WHERE e.name LIKE 'MVP-03 smoke %' ORDER BY r.created_at DESC LIMIT 5;"
+```
+
+Expect two rows for the latest smoke experiment with `QUEUED`, `same_owner = t`, and `same_config = t`. Older smoke runs may also appear if the script was run before. The two configurations match because the API blocks edits once runs exist; each run stores its own copy.
+
+#### 7. Run automated checks and stop local services
 
 From `backend/`, with the optional runner installed and `FLUKE_TEST_ADMIN_URL` configured:
 
@@ -475,3 +622,13 @@ uv build
 The focused PostgreSQL check passed **10 tests** on 2026-10-08; the complete runner-enabled suite passed **74 tests** with no skips. Confirm your own summary: a skipped PostgreSQL test means `FLUKE_TEST_ADMIN_URL` was not configured, and a skipped runner test means the optional extra was not installed. [test_experiments_api.py](../backend/tests/test_experiments_api.py) checks defaults, edit, queued snapshot persistence, invalid forms, authentication, and cross-user `404`s. [test_database.py](../backend/tests/test_database.py) checks migration, downgrade/reapply, and schema readiness using disposable databases.
 
 Stop Uvicorn with `Ctrl+C`. `docker compose down` stops PostgreSQL but retains accounts and experiments in its named volume. The Swagger token is cleared with **Authorize → Logout**; that does not revoke the signed JWT before its one-hour expiry.
+
+| If this happens | Check |
+|---|---|
+| `/health/ready` returns `503` | PostgreSQL is healthy and `uv run --locked alembic current` says `20261008_0003 (head)`. |
+| Login returns `401` | The account was created, is active, and the password matches the hidden prompt. |
+| A protected route returns `401` | Swagger authorization or the smoke script uses a current bearer token. |
+| An owned record unexpectedly returns `404` | The request uses the UUID from the same user's create response. Another user's UUID intentionally returns `404`. |
+| An edit returns `409` | That experiment already has at least one run; create a new experiment for changed settings. |
+| A form returns `422` | Check the `detail` list for a missing/extra field, range error, or FedAvg/FedProx `mu` rule. |
+| PostgreSQL tests are skipped | Set `FLUKE_TEST_ADMIN_URL` to the local `postgres` maintenance database in ignored `.env`, then rerun. |
