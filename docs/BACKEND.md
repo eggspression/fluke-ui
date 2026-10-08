@@ -1,6 +1,6 @@
 # FLUKE UI backend — small MVP design
 
-**Planning status, 2026-10-07:** This is the target for the 3–4 week university MVP, not a claim that all these features exist. BE-01–04, MVP-01 authentication, and the MVP-02 subprocess runner are implemented today. Experiment persistence, the worker, and Angular remain planned. See [TICKETS.md](TICKETS.md) for work order, [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for shipped code, and [CONTEXT.MD](../CONTEXT.MD) for a new-thread handoff.
+**Planning status, 2026-10-08:** This is the target for the 3–4 week university MVP, not a claim that all these features exist. BE-01–04 and MVP-01–03 are implemented. The worker and Angular remain planned. See [TICKETS.md](TICKETS.md) for work order, [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for shipped code, and [CONTEXT.MD](../CONTEXT.MD) for a new-thread handoff.
 
 ## What the demo must do
 
@@ -40,11 +40,11 @@ The UI form and API accept a deliberately small configuration:
 
 The server maps these values through two readable FLUKE templates. Dataset MNIST, IID distribution, `MNIST_2NN`, CPU, seed 42, and participation fraction 1.0 are fixed. MVP-02 proved a 1% MNIST sample (`sampling_perc: 0.01`) for two-round runs of both algorithms. Dataset paths, logger names, output locations, and Python import strings are never accepted from a request. There is no generic catalog registry or separate validation endpoint. The FastAPI request model validates the form when an experiment is saved.
 
-An experiment stores its owner, name, configuration, and timestamps. It can be edited until its first run is created. Once a run exists, a `PATCH` returns `409`, so earlier work stays understandable. Each run stores a copy of the configuration, experiment/owner IDs, status, timestamps, and a short failure message. Store logs and metrics in a run directory selected from the server-generated run ID. Do not store absolute user-supplied paths in the database.
+MVP-03 implements `experiments` and `runs` with owner IDs, configuration JSON, and timestamps. An experiment can be edited until its first run is created. Once a run exists, a `PATCH` returns `409`; edit and launch lock the experiment row to preserve this rule under concurrent requests. Each launch stores a separate configuration copy and `QUEUED` status. Run execution, logs, and metrics are MVP-04 work. Store their files in a run directory selected from the server-generated run ID; do not store user-supplied paths in the database.
 
 ## Small HTTP contract
 
-Keep the `/api/v1` prefix. Planned endpoints:
+Keep the `/api/v1` prefix. Experiment and queued-run routes are implemented; logs and accuracy arrive with MVP-04:
 
 | Route | Purpose |
 |---|---|

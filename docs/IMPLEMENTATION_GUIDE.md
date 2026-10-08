@@ -1,10 +1,10 @@
 # Backend code walkthrough — completed tickets
 
-This document explains **implemented code only**. As checked on **2026-10-07**, BE-01–04, the MVP-01 auth simplification, and the MVP-02 FLUKE subprocess proof are complete. The [roadmap](TICKETS.md) remains the source for pending tickets and completion criteria; [BACKEND.md](BACKEND.md) describes the target architecture, [backend/README.md](../backend/README.md) contains runnable setup commands, and [CONTEXT.MD](../CONTEXT.MD) is the next-session handoff. Recheck source and tests if you read this after the snapshot date.
+This document explains **implemented code only**. As checked on **2026-10-08**, BE-01–04 and MVP-01–03 are complete. The [roadmap](TICKETS.md) remains the source for pending tickets and completion criteria; [BACKEND.md](BACKEND.md) describes the target architecture, [backend/README.md](../backend/README.md) contains runnable setup commands, and [CONTEXT.MD](../CONTEXT.MD) is the next-session handoff. Recheck source and tests if you read this after the snapshot date.
 
 ## Start with the part that runs now
 
-The current backend can answer a health request, connect to a migrated PostgreSQL database, let an operator create an account, and let that user log in and inspect their identity. Client logout discards the token; there is no server logout route. A separate CLI runner can execute FedAvg or FedProx in its own process. There is no experiment table, run queue, worker, or Angular source yet.
+The current backend can answer a health request, connect to a migrated PostgreSQL database, let an operator create an account, and let that user log in and inspect their identity. Client logout discards the token; there is no server logout route. A separate CLI runner can execute FedAvg or FedProx in its own process. Owned experiments and `QUEUED` run records are available through the API. There is no worker or Angular source yet.
 
 ```text
 Operator CLI ── create/reset/deactivate ─┐
@@ -39,7 +39,7 @@ Milestone A is the runnable foundation. Each subsection below follows one behavi
 
 ### BE-02 — Database lifecycle and migrations
 
-**What exists:** [database.py](../backend/src/fluke_backend/database.py) creates a psycopg-backed SQLAlchemy engine and a transaction factory. [models.py](../backend/src/fluke_backend/auth/models.py) defines the `User` object-relational mapping (ORM) model: a Python object mapped to a database row. The first [Alembic migration](../backend/migrations/versions/20261006_0001_users_sessions.py) created `users` and `sessions`; the [MVP-01 migration](../backend/migrations/versions/20261007_0002_drop_sessions.py) removes `sessions` while retaining users. The current schema has `users` and `alembic_version`, with a unique email constraint, UUID keys, and timezone-aware timestamps. Alembic is the schema migration tool; defining an ORM model alone does not change PostgreSQL.
+**What exists:** [database.py](../backend/src/fluke_backend/database.py) creates a psycopg-backed SQLAlchemy engine and a transaction factory. [models.py](../backend/src/fluke_backend/auth/models.py) defines the `User` object-relational mapping (ORM) model: a Python object mapped to a database row. The first [Alembic migration](../backend/migrations/versions/20261006_0001_users_sessions.py) created `users` and `sessions`; the [MVP-01 migration](../backend/migrations/versions/20261007_0002_drop_sessions.py) removes `sessions` while retaining users. The current schema has `users`, `experiments`, `runs`, and `alembic_version`, with UUID keys and timezone-aware timestamps. The [MVP-03 migration](../backend/migrations/versions/20261008_0003_experiments_runs.py) adds the latter two resource tables. Alembic is the schema migration tool; defining an ORM model alone does not change PostgreSQL.
 
 **Trace a database write, step by step:**
 
@@ -93,7 +93,7 @@ A successful response has this shape (values are placeholders):
 
 **Trace `/me`:** `get_current_user()` reads `Authorization: Bearer <token>`. `TokenService.authenticate()` pins HS256 and the issuer, requires and verifies the claims and expiry, parses the user UUID, and loads that user from PostgreSQL. It rejects missing, malformed, forged, expired, or older session-based tokens and inactive or deleted users. It does not consult a token table. A password reset leaves an already issued token valid until its signed expiry; account deactivation makes it fail at the next authenticated request. Angular's eventual logout action will simply discard its in-memory token.
 
-**Trace errors and browser access:** [app.py](../backend/src/fluke_backend/app.py) uses FastAPI's ordinary `detail` responses for HTTP and validation errors. `FLUKE_DEVELOPMENT_ORIGINS` configures exact allowed browser origins; the default list is empty. Cross-origin resource sharing (CORS) decides which browser origins may read responses. It does not authorize data access. There are no experiment or run endpoints yet; owner checks arrive with those resources.
+**Trace errors and browser access:** [app.py](../backend/src/fluke_backend/app.py) uses FastAPI's ordinary `detail` responses for HTTP and validation errors. `FLUKE_DEVELOPMENT_ORIGINS` configures exact allowed browser origins; the default list is empty. Cross-origin resource sharing (CORS) decides which browser origins may read responses. It does not authorize data access. MVP-03 experiment and run endpoints filter every resource lookup by the authenticated owner.
 
 **Follow it yourself:** Read `login()` and `get_current_user()` in [auth/api.py](../backend/src/fluke_backend/auth/api.py), then `TokenService.login()` and `authenticate()` in [auth/tokens.py](../backend/src/fluke_backend/auth/tokens.py). [test_auth_api.py](../backend/tests/test_auth_api.py) covers one-hour claims, `/me`, operator-created users, invalid tokens, reset, deactivation, FastAPI errors, and CORS. Run `uv run --locked pytest -q tests/test_auth_api.py` with disposable PostgreSQL enabled. The live API generates its schema at `/openapi.json`; no schema snapshot is tracked.
 
@@ -123,7 +123,7 @@ uv run --locked alembic current
 uv run --locked alembic check
 ```
 
-If Colima is already running, skip `colima start`. Expect `20261007_0002 (head)` from `alembic current` and `No new upgrade operations detected` from `alembic check`. The current schema has `users` and `alembic_version`, not `sessions`. The automated migration test below proves that upgrading from the earlier revision preserves existing users and that downgrade/reapply works. Do **not** downgrade your application database to test that behavior.
+If Colima is already running, skip `colima start`. Expect `20261008_0003 (head)` from `alembic current` and `No new upgrade operations detected` from `alembic check`. The current schema has `users`, `experiments`, `runs`, and `alembic_version`, not `sessions`. The automated migration test below proves that upgrading from the earlier revision preserves existing users and that downgrade/reapply works. Do **not** downgrade your application database to test that behavior.
 
 ### 2. Start the API and test health
 
@@ -207,7 +207,7 @@ uv run --locked alembic check
 uv build
 ```
 
-The full PostgreSQL run currently has **45 passing tests**. Inspect the pytest summary: if integration tests are **skipped**, you have not verified database behavior. The upstream Starlette/HTTPX deprecation warning does not fail the suite. `ruff check` and `ruff format --check` should pass; Alembic should report no pending schema operations; `uv build` should produce a wheel and source distribution.
+The full runner-enabled backend suite on 2026-10-08 passed **74 tests** with PostgreSQL and no skips. A fresh base installation skips the optional FLUKE test. Inspect your own pytest summary: if integration tests are **skipped**, you have not verified database behavior. The upstream Starlette/HTTPX deprecation warning does not fail the suite. `ruff check` and `ruff format --check` should pass; Alembic should report no pending schema operations; `uv build` should produce a wheel and source distribution.
 
 | Test file | What it proves |
 |---|---|
@@ -237,7 +237,7 @@ Stop Uvicorn with `Ctrl+C`. `docker compose down` stops PostgreSQL but retains i
 
 ## MVP-02 — Two real FLUKE CPU proofs (implemented)
 
-**What exists:** [runner.py](../backend/src/fluke_backend/runner.py) validates the small JSON snapshot, maps it to fixed MNIST/IID/CPU settings, collects global accuracy, and writes a complete result file. [runner_cli.py](../backend/src/fluke_backend/runner_cli.py) is the subprocess entry point. The optional `runner` dependency group pins FLUKE to revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`; a normal API install still omits FLUKE and PyTorch. There are no runner HTTP routes or database writes yet.
+**What exists:** [runner.py](../backend/src/fluke_backend/runner.py) validates the small JSON snapshot, maps it to fixed MNIST/IID/CPU settings, collects global accuracy, and writes a complete result file. [runner_cli.py](../backend/src/fluke_backend/runner_cli.py) is the subprocess entry point. The optional `runner` dependency group pins FLUKE to revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`; a normal API install still omits FLUKE and PyTorch. The runner CLI itself has no HTTP routes or database writes; MVP-03 stores only queued run records.
 
 **Trace one run, step by step:**
 
@@ -381,3 +381,97 @@ uv run --locked --extra runner alembic check
 ```
 
 The 2026-10-07 full check passed **68 tests** with PostgreSQL and the runner extra available. Read the pytest summary: a skipped PostgreSQL test means the database behavior was not verified, and a skipped runner test means the extra was not available. MVP-02 changes no database schema, so Alembic should report `No new upgrade operations detected`. A normal `uv sync --locked` later returns the environment to the lightweight API install. Keep `$guide_dir` until you have inspected its logs; the directory remains ignored by Git.
+
+## MVP-03 — Owned experiments and queued run requests (implemented)
+
+**What exists:** [ExperimentForm](../backend/src/fluke_backend/experiments/api.py) adds a trimmed, nonempty name of at most 120 characters to the proven [RunConfig](../backend/src/fluke_backend/runner.py). The request accepts only `algorithm`, `n_clients`, `n_rounds`, `local_epochs`, and FedProx `mu` alongside the name. Counts are strict integers; `mu` must be a positive JSON number, so booleans and numeric strings are rejected. FedAvg rejects `mu` entirely. Defaults are four clients, two rounds, one local epoch, and FedProx `mu: 0.3`. Dataset, model, distribution, device, seed, sample fraction, import names, and paths are server controlled.
+
+[models.py](../backend/src/fluke_backend/experiments/models.py) maps `experiments` and `runs` to PostgreSQL; the [migration](../backend/migrations/versions/20261008_0003_experiments_runs.py) creates both tables. Each row has an owner UUID. An experiment keeps its name, configuration JSON, and creation/update times. A run keeps its experiment and owner IDs, a separate configuration JSON value, status, timestamps, and a nullable short failure message. MVP-03 creates only `QUEUED` runs. `started_at`, `finished_at`, and `failure_message` remain null until the worker arrives in MVP-04.
+
+**Trace an HTTP request:** [app.py](../backend/src/fluke_backend/app.py) registers the [experiment router](../backend/src/fluke_backend/experiments/api.py). The existing `get_current_user` dependency verifies the one-hour JWT and active user on every route. The router parses the form and returns ordinary FastAPI `422` validation responses. [ExperimentService](../backend/src/fluke_backend/experiments/service.py) scopes all reads and writes to that user's ID; another user's UUID and a missing UUID both produce `404`. Create returns `201`, launch returns `202`, and a full replacement `PATCH` returns `409` after any run exists. There is no separate validation endpoint.
+
+Edit and launch both lock the experiment row while their transaction runs. Launch copies the current configuration into a new run, commits `QUEUED`, and returns immediately. It does not import FLUKE, start a process, or write logs. The run snapshot remains the same even if the experiment row changes independently. Per-experiment history and the owned run detail are available now; training, accuracy, and log routes are MVP-04.
+
+### MVP-03 — complete test guide
+
+Use two throwaway users and the local PostgreSQL service. Commands below run from `backend/`. The API requests use Swagger UI so tokens and passwords do not enter shell history. The account and experiment rows persist in the local development volume; choose test accounts you can leave there.
+
+#### 1. Prepare the schema and two users
+
+Follow Milestone A step 1 to configure ignored `.env` and `FLUKE_TEST_ADMIN_URL`. Start Colima if needed, then run:
+
+```sh
+colima start
+docker compose up -d --wait postgres
+uv run --locked alembic upgrade head
+uv run --locked alembic current
+uv run --locked alembic check
+uv run --locked fluke-admin create-user --email mvp03-alice@example.com
+uv run --locked fluke-admin create-user --email mvp03-bob@example.com
+```
+
+Skip `colima start` if it is already running. Each account command prompts for a password without echo. Use unique addresses if those accounts already exist. Expect `20261008_0003 (head)` and `No new upgrade operations detected` from Alembic. The migration is additive to the existing users table; do not downgrade your application database for a test.
+
+Start the API in a second terminal:
+
+```sh
+uv run --locked uvicorn fluke_backend.app:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+Open <http://127.0.0.1:8000/docs>. `GET /health/ready` should return `200` with `{"status":"ok"}`. A stale schema returns `503` until `alembic upgrade head` runs.
+
+#### 2. Create, read, and edit Alice's experiment
+
+In Swagger, log in with **POST /api/v1/auth/login** using Alice's address and password. Copy the `access_token` into **Authorize** without a `Bearer ` prefix. Try **POST /api/v1/experiments** with:
+
+```json
+{"name":"First proof","algorithm":"fedavg"}
+```
+
+Expect `201` and record the returned experiment `id`. Its `config` should contain `fedavg`, `n_clients: 4`, `n_rounds: 2`, and `local_epochs: 1`, with no `mu`. Both timestamps should be present. **GET /api/v1/experiments** returns an array containing it; **GET /api/v1/experiments/{experiment_id}** returns the same record.
+
+Use **PATCH /api/v1/experiments/{experiment_id}** with that ID and a complete replacement form:
+
+```json
+{"name":"Prox proof","algorithm":"fedprox","n_clients":2,"n_rounds":2,"local_epochs":1,"mu":0.5}
+```
+
+Expect `200` with the new name and full FedProx configuration. A PATCH body needs `name` and `algorithm`; omitted numeric fields take their defaults. It does not merge into the old configuration.
+
+#### 3. Queue a run and inspect its snapshot
+
+Use **POST /api/v1/experiments/{experiment_id}/runs** with the same ID and no body. Expect `202`, `status: "QUEUED"`, a new run `id`, and a `config` equal to the edited experiment's configuration. `failure_message`, `started_at`, and `finished_at` should be null. **GET /api/v1/runs/{run_id}** returns that run; **GET /api/v1/experiments/{experiment_id}/runs** returns it in a newest-first array.
+
+Retry the PATCH from step 2. It should now return `409` with `detail: "Experiment already has runs"`; a second GET of the run should still show the original snapshot. Launching another run is allowed and creates another distinct `QUEUED` record. These records stay queued until the MVP-04 worker is implemented; waiting or refreshing does not train them.
+
+#### 4. Check validation and owner boundaries
+
+While authorized as Alice, try separate **POST /api/v1/experiments** requests with these bodies. Each should return FastAPI `422` with a `detail` list and create no experiment:
+
+```json
+{"name":"Bad choice","algorithm":"other"}
+{"name":"Too few clients","algorithm":"fedavg","n_clients":1}
+{"name":"Wrong mu","algorithm":"fedavg","mu":0.3}
+{"name":"Wrong type","algorithm":"fedprox","mu":true}
+{"name":"User path","algorithm":"fedavg","dataset":"/tmp/other"}
+```
+
+Use **Authorize → Logout**, then log in as Bob and authorize his token. Bob's experiment list should be empty. Alice's experiment detail, edit, launch, and history URLs should each return `404`; Alice's run detail URL should also return `404`. A completely unknown UUID has the same `404` result. Log out in Swagger and request the experiment list again: expect `401`. This checks the API ownership boundary, not browser filtering.
+
+#### 5. Run automated checks and stop local services
+
+From `backend/`, with the optional runner installed and `FLUKE_TEST_ADMIN_URL` configured:
+
+```sh
+uv sync --locked --extra runner
+uv run --locked --extra runner pytest -q -rs tests/test_experiments_api.py tests/test_database.py
+uv run --locked --extra runner pytest -q -rs
+uv run --locked --extra runner ruff check .
+uv run --locked --extra runner ruff format --check .
+uv run --locked --extra runner alembic check
+uv build
+```
+
+The focused PostgreSQL check passed **10 tests** on 2026-10-08; the complete runner-enabled suite passed **74 tests** with no skips. Confirm your own summary: a skipped PostgreSQL test means `FLUKE_TEST_ADMIN_URL` was not configured, and a skipped runner test means the optional extra was not installed. [test_experiments_api.py](../backend/tests/test_experiments_api.py) checks defaults, edit, queued snapshot persistence, invalid forms, authentication, and cross-user `404`s. [test_database.py](../backend/tests/test_database.py) checks migration, downgrade/reapply, and schema readiness using disposable databases.
+
+Stop Uvicorn with `Ctrl+C`. `docker compose down` stops PostgreSQL but retains accounts and experiments in its named volume. The Swagger token is cleared with **Authorize → Logout**; that does not revoke the signed JWT before its one-hour expiry.

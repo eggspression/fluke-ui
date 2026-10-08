@@ -2,8 +2,8 @@
 
 Milestone A (BE-01–04) provides an installable API, PostgreSQL persistence,
 reversible migrations, health endpoints, operator account management, and
-one-hour JWT login. MVP-02 adds a separate FLUKE CPU runner. Experiment
-resources and worker execution are later tickets.
+one-hour JWT login. MVP-02 adds a separate FLUKE CPU runner. MVP-03 adds owned
+experiments and queued run requests. Worker execution is a later ticket.
 
 ## Requirements
 
@@ -148,6 +148,22 @@ Run the optional failure check with
 `uv run --locked --extra runner pytest -q -m runner`; no real training succeeds in this test. The full base suite skips
 this optional test when FLUKE is absent.
 
+## MVP-03: save experiments and queue runs
+
+After `uv run --locked alembic upgrade head`, log in through
+<http://127.0.0.1:8000/docs> and authorize with the returned bearer token.
+`POST /api/v1/experiments` accepts a name plus the small runner form; for
+example, `{"name":"Demo","algorithm":"fedavg"}`. It returns `201` with the
+default client, round, and epoch counts. `GET /api/v1/experiments` and
+`GET /api/v1/experiments/{id}` return only your own records. `PATCH` with a
+complete replacement form works until the experiment has a run; it then returns
+`409`. `POST /api/v1/experiments/{id}/runs` returns `202` and a `QUEUED` run
+with a copy of that experiment's configuration. Owned run detail and
+per-experiment history are available through `GET /api/v1/runs/{id}` and
+`GET /api/v1/experiments/{id}/runs`. The API does not start FLUKE or process the
+queue yet. [The MVP-03 guide](../docs/IMPLEMENTATION_GUIDE.md) has a full manual
+test, including invalid forms and a second user's access checks.
+
 `docker compose down` stops the development database and retains its named volume.
 The configured password initializes a new volume; changing `.env` does not change
 the password of an existing database. The database port is bound to localhost.
@@ -196,8 +212,9 @@ explicit skips. With the URL set, connection errors fail the suite. Use
 Alembic migrations live in `backend/migrations/`. `uv run --locked alembic current`
 shows the database revision. `uv run --locked alembic check` compares ORM metadata
 with the applied schema. The first migration created `users` and `sessions`; MVP-01 adds a second
-migration that drops `sessions` while preserving users. The current schema has
-UUID user keys and timezone-aware timestamps. SQLAlchemy sessions commit when
+migration that drops `sessions` while preserving users. MVP-03 adds `experiments`
+and `runs`; current head is `20261008_0003`. The schema has UUID keys and
+timezone-aware timestamps. SQLAlchemy sessions commit when
 their transaction block succeeds and roll back on errors. Revision compatibility
 is checked on every readiness request.
 

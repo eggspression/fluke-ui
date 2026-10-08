@@ -2,7 +2,7 @@
 
 This is the **active** roadmap for a 3–4 week university project. The goal is one understandable end-to-end demonstration: log in, configure FedAvg or FedProx on MNIST, save an experiment, run it on CPU, and inspect its status, logs, accuracy, and history in Angular. [BACKEND.md](BACKEND.md) defines the small technical contract. [CONTEXT.MD](../CONTEXT.MD) is the next-thread handoff.
 
-BE-01–04, MVP-01, and MVP-02 are implemented; [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) explains the **current** code. The former BE-05–20 roadmap was superseded after Milestone B was reverted. Its implementation is not in the working tree. Git history retains it if needed, but it is not the MVP checklist.
+BE-01–04 and MVP-01–03 are implemented; [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) explains the **current** code. The former BE-05–20 roadmap was superseded after Milestone B was reverted. Its implementation is not in the working tree. Git history retains it if needed, but it is not the MVP checklist.
 
 Complete tickets in order. Check a box only after its behavior works, relevant tests pass, and this roadmap and the implementation guide reflect what actually shipped. Prefer a small function and a focused test over a framework of services or schemas for hypothetical future features. Run the backend suite and Ruff before marking a backend ticket done. No secrets, datasets, run logs, or generated models belong in Git.
 
@@ -30,7 +30,7 @@ Pin FLUKE to inspected revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`. Buil
 
 ## MVP-03 — Save owned experiments and run requests
 
-- [ ] **Not started.**
+- [x] **Implemented and verified, 2026-10-08.** Owned experiments and queued run snapshots work. The PostgreSQL and runner-enabled backend suite passed 74 tests; Ruff, build, and Alembic checks passed. Continue with MVP-04.
 
 Add one small validated form schema: `algorithm` (`fedavg` or `fedprox`), `n_clients` (2–10, default 4), `n_rounds` (1–5, default 2), `local_epochs` (1–3, default 1), and positive FedProx `mu` (default 0.3; not accepted for FedAvg). Fix MNIST, IID, CPU, `MNIST_2NN`, seed 42, and a small MNIST sample in server-owned FLUKE templates; the proof ticket confirms the usable sample fraction. Do not create a generic catalog, separate validation endpoint, or user-selectable Python import/path fields.
 

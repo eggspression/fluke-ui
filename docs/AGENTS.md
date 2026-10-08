@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository contains architecture documents, the backend authentication foundation, and an isolated FLUKE runner. `SYSTEM_OVERVIEW.md` defines the planned FLUKE web management platform's three boundaries: an Angular frontend, a backend API, and the external FLUKE execution framework. `BACKEND.md` and `TICKETS.md` specify the active MVP scope.
+This repository contains architecture documents, the backend authentication foundation, owned experiments and queued runs, and an isolated FLUKE runner. `SYSTEM_OVERVIEW.md` defines the planned FLUKE web management platform's three boundaries: an Angular frontend, a backend API, and the external FLUKE execution framework. `BACKEND.md` and `TICKETS.md` specify the active MVP scope.
 
 As implementation is added, keep these concerns in separate top-level directories (for example, `frontend/` and `backend/`). Place tests beside their owning module or in a clearly named `tests/` directory, and keep generated run logs, metrics, model outputs, and secrets out of version control. Add component-specific documentation such as `FRONTEND.md` or `BACKEND.md` when design detail no longer belongs in the system overview.
 

@@ -1,6 +1,6 @@
 # FLUKE UI — next-thread handoff
 
-Checked on **2026-10-07**. This file distinguishes what exists from the newly agreed MVP plan. Recheck `git status`, source, and tests at the start of a new thread; this handoff does not override the current user's instructions.
+Checked on **2026-10-08**. This file distinguishes what exists from the newly agreed MVP plan. Recheck `git status`, source, and tests at the start of a new thread; this handoff does not override the current user's instructions.
 
 ## What the user wants
 
@@ -12,27 +12,27 @@ The user chose to **simplify Milestone A first**. MVP-01 now uses one-hour state
 
 ## Repository truth today
 
-Milestone A (BE-01–04), MVP-01, and MVP-02 are implemented. The package uses uv/Python 3.11, FastAPI, PostgreSQL 17, SQLAlchemy/Alembic, Argon2, and one-hour signed JWTs. It serves health and login/current-user routes. A separate optional runner executes real FLUKE FedAvg and FedProx CPU runs from JSON snapshots. There is **no** experiment table/API, run queue, worker, or Angular app. The sessions table and `/auth/logout` route have been removed by a migration; `backend/openapi.json` is no longer tracked.
+Milestone A (BE-01–04) and MVP-01–03 are implemented. The package uses uv/Python 3.11, FastAPI, PostgreSQL 17, SQLAlchemy/Alembic, Argon2, and one-hour signed JWTs. It serves health and login/current-user routes. A separate optional runner executes real FLUKE FedAvg and FedProx CPU runs from JSON snapshots. Owned experiment and run tables/API exist; launch stores `QUEUED` run snapshots only. There is no worker or Angular app. The sessions table and `/auth/logout` route have been removed by a migration; `backend/openapi.json` is no longer tracked.
 
-Milestone B's previous implementation was reverted in commit `41084e2`; the active MVP does not reuse its catalog/experiment subsystem. The local database is at `20261007_0002`. The MVP-02 check passed **68 tests** with PostgreSQL and the optional FLUKE runner installed, plus Ruff, package build, and Alembic metadata comparison. FedAvg and FedProx each completed two rounds using two clients, one local epoch, and `sampling_perc: 0.01`; cached-data runs took 3.98 and 4.16 seconds on this Mac. The first real run downloaded approximately 64 MB of MNIST data. Treat timing and test counts as dated evidence, not a future guarantee.
+Milestone B's previous implementation was reverted in commit `41084e2`; the active MVP does not reuse its catalog/experiment subsystem. The local database is at `20261008_0003`. The MVP-03 check passed **74 tests** with PostgreSQL and the optional FLUKE runner installed, plus Ruff, package build, and Alembic metadata comparison. FedAvg and FedProx each completed two rounds using two clients, one local epoch, and `sampling_perc: 0.01`; cached-data runs took 3.98 and 4.16 seconds on this Mac. The first real run downloaded approximately 64 MB of MNIST data. Treat timing and test counts as dated evidence, not a future guarantee.
 
-The local `local/docs` branch tracks documentation and remains unpushed. An unrelated uncommitted `backend/src/fluke_backend/app.py` type-ignore comment was present before MVP-02 and was preserved. `backend/.env` contains ignored local secrets; never print, commit, or copy its values into documentation.
+The local `local/docs` branch tracks documentation and remains unpushed. `backend/.env` contains ignored local secrets; never print, commit, or copy its values into documentation.
 
 ## Active documents
 
-1. [MVP tickets](docs/TICKETS.md) — the six-ticket active checklist and order. **MVP-03 is next.** The old BE-05–20 ticket plan is superseded, not implemented.
+1. [MVP tickets](docs/TICKETS.md) — the six-ticket active checklist and order. **MVP-04 is next.** The old BE-05–20 ticket plan is superseded, not implemented.
 2. [Backend design](docs/BACKEND.md) — exact small form, API, data flow, worker, and failure rules.
 3. [System overview](docs/SYSTEM_OVERVIEW.md) — short user journey and success criteria.
-4. [Implementation guide](docs/IMPLEMENTATION_GUIDE.md) — detailed explanation of **currently shipped** BE-01–04, MVP-01, and MVP-02 code.
+4. [Implementation guide](docs/IMPLEMENTATION_GUIDE.md) — detailed explanation of **currently shipped** BE-01–04 and MVP-01–03 code.
 5. [Backend setup](backend/README.md) — commands that work for today's code; update them with each implemented slice.
 
 The pinned FLUKE checkout is `../fluke` at revision `37c54630f0b4d9d6164f003cbed0811019acc5e1`. Its process-wide `FlukeENV` is why every run gets a subprocess. The new runner uses public construction and observer APIs, never private `_run_federation()`. It requires the requested number of completed rounds and finite global accuracy before writing `result.json`; it writes a diagnostic `run.log` even for ordinary failures. Keep this simple contract for the worker.
 
-## Exact next action: MVP-03 only
+## Exact next action: MVP-04 only
 
-Read the MVP-03 pass requirements and use `RunConfig` from the proven runner as the small form contract. Add owned `experiments` and `runs` tables, owned create/list/get and pre-first-run edit, and a launch route that writes only a `QUEUED` snapshot. Do not train inside FastAPI. Keep the configuration copy immutable once a run is created; no revisions, archives, export, reruns, or idempotency system.
+Read the MVP-04 pass requirements. Add one local worker command that reads the oldest `QUEUED` run, marks it `RUNNING`, and launches the proven runner in a fresh subprocess. Keep secrets out of its environment. Validate exit status and result file before marking `COMPLETED`; otherwise store `FAILED` with a safe reason. Add owned status/accuracy and recent-log reads. Do not add automatic recovery or distributed machinery.
 
-MVP-01 changed existing behavior: user records survive migration, old login tokens are invalid, and password reset no longer revokes a token already issued. Account deactivation still blocks authenticated requests. Verify the local database is at `20261007_0002` before serving API traffic.
+MVP-01 changed existing behavior: user records survive migration, old login tokens are invalid, and password reset no longer revokes a token already issued. Account deactivation still blocks authenticated requests. Verify the local database is at `20261008_0003` before serving API traffic.
 
 ## Working rhythm and limits
 
