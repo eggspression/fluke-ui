@@ -8,7 +8,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from fluke_backend.settings import Settings
 
-EXPECTED_REVISION = "20261007_0002"
+EXPECTED_REVISION = "20261008_0003"
 
 
 class Base(DeclarativeBase):

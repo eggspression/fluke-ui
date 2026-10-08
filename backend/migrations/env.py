@@ -8,6 +8,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.pool import NullPool
 
 import fluke_backend.auth.models  # noqa: F401 - registers identity tables with Base.metadata
+import fluke_backend.experiments.models  # noqa: F401 - registers experiment tables
 from fluke_backend.database import Base
 from fluke_backend.settings import Settings
 
