@@ -1,6 +1,6 @@
 # FLUKE UI backend — small MVP design
 
-**Planning status, 2026-10-08:** This is the target for the 3–4 week university MVP, not a claim that all these features exist. BE-01–04 and MVP-01–03 are implemented. The worker and Angular remain planned. See [TICKETS.md](TICKETS.md) for work order, [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for shipped code, and [CONTEXT.MD](../CONTEXT.MD) for a new-thread handoff.
+**Planning status, 2026-10-10:** This is the target for the 3–4 week university MVP, not a claim that all these features exist. BE-01–04 and MVP-01–03 are implemented. The worker and Angular remain planned. See [TICKETS.md](TICKETS.md) for work order, [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for shipped code, and [CONTEXT.MD](../CONTEXT.MD) for a new-thread handoff.
 
 ## What the demo must do
 
@@ -46,15 +46,15 @@ MVP-03 implements `experiments` and `runs` with owner IDs, configuration JSON, a
 
 Keep the `/api/v1` prefix. Experiment and queued-run routes are implemented; logs and accuracy arrive with MVP-04:
 
-| Route | Purpose |
-|---|---|
-| `POST /auth/login`, `GET /auth/me` | Login and current user |
-| `GET/POST /experiments`, `GET/PATCH /experiments/{id}` | Owned configurations; edits only before first run |
-| `POST /experiments/{id}/runs` | Save a `QUEUED` run snapshot; return `202` |
-| `GET /experiments/{id}/runs`, `GET /runs/{id}` | Owned history, status, failure, and available per-round accuracy |
-| `GET /runs/{id}/logs` | Bounded recent diagnostic text, including during a run |
+| Route | Purpose | State |
+|---|---|---|
+| `POST /auth/login`, `GET /auth/me` | Login and current user | Implemented |
+| `GET/POST /experiments`, `GET/PATCH /experiments/{id}` | Owned configurations; edits only before first run | Implemented |
+| `POST /experiments/{id}/runs` | Save a `QUEUED` run snapshot; return `202` | Implemented |
+| `GET /experiments/{id}/runs`, `GET /runs/{id}` | Owned history and queued-run detail; accuracy/failure populated by worker later | Implemented routes; worker data planned |
+| `GET /runs/{id}/logs` | Bounded recent diagnostic text, including during a run | Planned for MVP-04 |
 
-All experiment/run/log lookups filter by the authenticated owner. Missing or someone else's resource returns `404`. A supplied configuration is a complete replacement on edit, not a nested merge. Lists can be simple newest-first arrays for this local MVP; add pagination only if real data volume requires it. Let FastAPI generate `/openapi.json` at runtime instead of committing a large snapshot.
+Current experiment and run lookups filter by the authenticated owner; the planned log route must do the same. Missing or someone else's resource returns `404`. A supplied configuration is a complete replacement on edit, not a nested merge. Lists can be simple newest-first arrays for this local MVP; add pagination only if real data volume requires it. Let FastAPI generate `/openapi.json` at runtime instead of committing a large snapshot.
 
 ## Runner and failure rules
 

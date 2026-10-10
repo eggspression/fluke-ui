@@ -4,6 +4,8 @@
 
 This repository contains architecture documents, the backend authentication foundation, owned experiments and queued runs, and an isolated FLUKE runner. `SYSTEM_OVERVIEW.md` defines the planned FLUKE web management platform's three boundaries: an Angular frontend, a backend API, and the external FLUKE execution framework. `BACKEND.md` and `TICKETS.md` specify the active MVP scope.
 
+For a new session, read [CONTEXT.MD](../CONTEXT.MD), then [TICKETS.md](TICKETS.md), [BACKEND.md](BACKEND.md), and [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md). Files in `docs/superpowers/plans/` record historical decisions; some BE-03/04 plans describe the older session-based authentication that MVP-01 replaced.
+
 As implementation is added, keep these concerns in separate top-level directories (for example, `frontend/` and `backend/`). Place tests beside their owning module or in a clearly named `tests/` directory, and keep generated run logs, metrics, model outputs, and secrets out of version control. Add component-specific documentation such as `FRONTEND.md` or `BACKEND.md` when design detail no longer belongs in the system overview.
 
 ## Build, Test, and Development Commands
@@ -13,8 +15,9 @@ The backend uses uv and Python 3.11. See [backend setup](../backend/README.md) f
 - `uv sync --locked` — install the project and development tools.
 - `uv sync --locked --extra runner` — include the pinned FLUKE/PyTorch stack for MVP-02 CPU proofs.
 - `docker compose up -d --wait postgres` — start PostgreSQL 17 with persistent storage.
+- `uv run --locked --extra runner alembic upgrade head` — apply the current database migration.
 - `uv run --locked uvicorn fluke_backend.app:create_app --factory --reload` — start the API.
-- `uv run --locked pytest` — execute backend tests.
+- `uv run --locked --extra runner pytest -q -rs` — execute the complete backend suite, including the optional runner check.
 - `uv run --locked ruff check .` — lint Python code.
 - `uv run --locked ruff format --check .` — check formatting.
 
@@ -32,4 +35,4 @@ Add tests with every behavior change. Cover authorization boundaries, experiment
 
 ## Commit & Pull Request Guidelines
 
-The repository uses short ticket branches and concise Conventional Commit subjects. Keep `main` working and retain local documentation on `local/docs` without pushing it. Pull requests should explain the change, testing performed, and architectural impact; include screenshots for visible UI changes. Never commit credentials, JWT secrets, local environment files, or generated FLUKE artifacts.
+The repository uses short ticket branches and concise Conventional Commit subjects. Keep `main` working. Documentation through MVP-03 was kept on `local/docs` while under review, then published with the code to `origin/main` at the user's request on 2026-10-10. For the next ticket, update current documentation alongside verified behavior. Pull requests should explain the change, testing performed, and architectural impact; include screenshots for visible UI changes. Never commit credentials, JWT secrets, local environment files, or generated FLUKE artifacts.

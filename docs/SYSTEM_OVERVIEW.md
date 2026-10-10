@@ -1,6 +1,6 @@
 # FLUKE UI — MVP overview
 
-**Planning status, 2026-10-08:** This describes the intended university-project demo. The repository currently implements backend setup, PostgreSQL, operator accounts, simplified one-hour JWT authentication, and a separate FLUKE subprocess runner proven with FedAvg and FedProx on sampled MNIST. Owned experiments and queued run records are implemented; the worker and Angular remain planned. See [TICKETS.md](TICKETS.md) for the active six-ticket roadmap and [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for behavior that exists today.
+**Planning status, 2026-10-10:** This describes the intended university-project demo. The repository currently implements backend setup, PostgreSQL, operator accounts, simplified one-hour JWT authentication, and a separate FLUKE subprocess runner proven with FedAvg and FedProx on sampled MNIST. Owned experiments and queued run records are implemented; the worker and Angular remain planned. See [TICKETS.md](TICKETS.md) for the active six-ticket roadmap and [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for behavior that exists today.
 
 ## Purpose
 

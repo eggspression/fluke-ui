@@ -2,7 +2,7 @@
 
 This is the **active** roadmap for a 3–4 week university project. The goal is one understandable end-to-end demonstration: log in, configure FedAvg or FedProx on MNIST, save an experiment, run it on CPU, and inspect its status, logs, accuracy, and history in Angular. [BACKEND.md](BACKEND.md) defines the small technical contract. [CONTEXT.MD](../CONTEXT.MD) is the next-thread handoff.
 
-BE-01–04 and MVP-01–03 are implemented; [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) explains the **current** code. The former BE-05–20 roadmap was superseded after Milestone B was reverted. Its implementation is not in the working tree. Git history retains it if needed, but it is not the MVP checklist.
+BE-01–04 and MVP-01–03 are implemented; [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) explains the **current** code. **MVP-04 is next**; [CONTEXT.MD](../CONTEXT.MD) records the verified starting state and the local queued smoke runs. The former BE-05–20 roadmap was superseded after Milestone B was reverted. Its implementation is not in the working tree. Git history retains it if needed, but it is not the MVP checklist.
 
 Complete tickets in order. Check a box only after its behavior works, relevant tests pass, and this roadmap and the implementation guide reflect what actually shipped. Prefer a small function and a focused test over a framework of services or schemas for hypothetical future features. Run the backend suite and Ruff before marking a backend ticket done. No secrets, datasets, run logs, or generated models belong in Git.
 

@@ -1,6 +1,6 @@
 # FLUKE UI — next-thread handoff
 
-Checked on **2026-10-08**. This file distinguishes what exists from the newly agreed MVP plan. Recheck `git status`, source, and tests at the start of a new thread; this handoff does not override the current user's instructions.
+Checked on **2026-10-10**. This file distinguishes implemented behavior from the remaining MVP plan. Recheck `git status`, source, and tests at the start of a new thread; this handoff does not override the current user's instructions.
 
 ## What the user wants
 
@@ -14,9 +14,9 @@ The user chose to **simplify Milestone A first**. MVP-01 now uses one-hour state
 
 Milestone A (BE-01–04) and MVP-01–03 are implemented. The package uses uv/Python 3.11, FastAPI, PostgreSQL 17, SQLAlchemy/Alembic, Argon2, and one-hour signed JWTs. It serves health and login/current-user routes. A separate optional runner executes real FLUKE FedAvg and FedProx CPU runs from JSON snapshots. Owned experiment and run tables/API exist; launch stores `QUEUED` run snapshots only. There is no worker or Angular app. The sessions table and `/auth/logout` route have been removed by a migration; `backend/openapi.json` is no longer tracked.
 
-Milestone B's previous implementation was reverted in commit `41084e2`; the active MVP does not reuse its catalog/experiment subsystem. The local database is at `20261008_0003`. The MVP-03 check passed **74 tests** with PostgreSQL and the optional FLUKE runner installed, plus Ruff, package build, and Alembic metadata comparison. FedAvg and FedProx each completed two rounds using two clients, one local epoch, and `sampling_perc: 0.01`; cached-data runs took 3.98 and 4.16 seconds on this Mac. The first real run downloaded approximately 64 MB of MNIST data. Treat timing and test counts as dated evidence, not a future guarantee.
+Milestone B's previous implementation was reverted in commit `41084e2`; the active MVP does not reuse its catalog/experiment subsystem. The local database is at `20261008_0003`. On 2026-10-10 the backend passed **74 tests with no skips** against PostgreSQL with the runner extra installed; Ruff lint/format, `uv build`, and Alembic metadata comparison passed. MVP-02 previously proved real two-round FedAvg and FedProx runs using two clients, one local epoch, and `sampling_perc: 0.01`; cached-data runs took 3.98 and 4.16 seconds on this Mac. The first real run downloaded approximately 64 MB of MNIST data. Treat timing and test counts as dated evidence, not a future guarantee.
 
-The local `local/docs` branch tracks documentation and remains unpushed. `backend/.env` contains ignored local secrets; never print, commit, or copy its values into documentation.
+The user authorized publishing the documentation with the code on 2026-10-10. Start new work from `origin/main`; `local/docs` is the former local documentation branch. `backend/.env` contains ignored local secrets; never print, commit, or copy its values into documentation.
 
 ## Active documents
 
@@ -30,12 +30,14 @@ The pinned FLUKE checkout is `../fluke` at revision `37c54630f0b4d9d6164f003cbed
 
 ## Exact next action: MVP-04 only
 
-Read the MVP-04 pass requirements. Add one local worker command that reads the oldest `QUEUED` run, marks it `RUNNING`, and launches the proven runner in a fresh subprocess. Keep secrets out of its environment. Validate exit status and result file before marking `COMPLETED`; otherwise store `FAILED` with a safe reason. Add owned status/accuracy and recent-log reads. Do not add automatic recovery or distributed machinery.
+Read the MVP-04 pass requirements in [TICKETS.md](docs/TICKETS.md) and the worker/failure rules in [BACKEND.md](docs/BACKEND.md). Start a short ticket branch from current `main`. Add one local worker command that reads the oldest `QUEUED` run, marks it `RUNNING`, and launches [runner_cli.py](backend/src/fluke_backend/runner_cli.py) in a fresh subprocess with the run's copied configuration. Keep JWT and database secrets out of its environment. Validate both exit status and `result.json` before marking `COMPLETED`; otherwise store `FAILED` with a safe reason. Add owned run accuracy and bounded recent-log reads. Test a real completed run, a deliberate failure, and cross-user denial. Do not add automatic recovery or distributed machinery.
+
+**Local database caution:** The development database currently has two `QUEUED` smoke-test runs under a deactivated throwaway account. A new worker that selects the oldest queued run will pick those first. Inspect them before the first worker smoke test with `docker compose exec -T postgres psql -U fluke -d fluke -c "SELECT id, status, created_at FROM runs ORDER BY created_at;"` from `backend/`. Keep tests on disposable PostgreSQL databases where possible; do not silently clear the application database.
 
 MVP-01 changed existing behavior: user records survive migration, old login tokens are invalid, and password reset no longer revokes a token already issued. Account deactivation still blocks authenticated requests. Verify the local database is at `20261008_0003` before serving API traffic.
 
 ## Working rhythm and limits
 
-From `backend/`: `uv sync --locked`, `docker compose up -d --wait postgres`, `uv run --locked alembic upgrade head`, `uv run --locked pytest -q`, `uv run --locked ruff check .`, and `uv run --locked ruff format --check .`. Add `--extra runner` to install and test FLUKE; direct runner commands are in `backend/README.md`. Database tests use disposable local PostgreSQL when `FLUKE_TEST_ADMIN_URL` is configured; confirm they ran rather than skipped.
+From `backend/`: `uv sync --locked --extra runner`, `docker compose up -d --wait postgres`, `uv run --locked --extra runner alembic upgrade head`, `uv run --locked --extra runner pytest -q -rs`, `uv run --locked --extra runner ruff check .`, `uv run --locked --extra runner ruff format --check .`, `uv run --locked --extra runner alembic check`, and `uv build`. Direct runner commands are in `backend/README.md`. Database tests use disposable local PostgreSQL when `FLUKE_TEST_ADMIN_URL` is configured; confirm they ran rather than skipped.
 
 Proceed ticket by ticket. Prefer one understandable module per real responsibility and tests of behavior rather than scaffolding for imagined features. Update the implementation guide with **what has been implemented**, with code traces and examples, only after a ticket is verified. No cancellation, CUDA, extra datasets, export, rerun, complex event protocol, or automated crash recovery unless the grading rubric requires it.

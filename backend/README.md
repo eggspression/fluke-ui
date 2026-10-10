@@ -164,6 +164,10 @@ per-experiment history are available through `GET /api/v1/runs/{id}` and
 queue yet. [The MVP-03 guide](../docs/IMPLEMENTATION_GUIDE.md) has a full manual
 test, including invalid forms and a second user's access checks.
 
+**Next ticket:** [MVP-04](../docs/TICKETS.md) adds the one-process worker and owned
+accuracy/log reads. [CONTEXT.MD](../CONTEXT.MD) records the starting state and
+notes queued smoke-test rows already present in this machine's local database.
+
 `docker compose down` stops the development database and retains its named volume.
 The configured password initializes a new volume; changing `.env` does not change
 the password of an existing database. The database port is bound to localhost.

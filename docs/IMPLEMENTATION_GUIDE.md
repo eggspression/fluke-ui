@@ -1,6 +1,6 @@
 # Backend code walkthrough — completed tickets
 
-This document explains **implemented code only**. As checked on **2026-10-08**, BE-01–04 and MVP-01–03 are complete. The [roadmap](TICKETS.md) remains the source for pending tickets and completion criteria; [BACKEND.md](BACKEND.md) describes the target architecture, [backend/README.md](../backend/README.md) contains runnable setup commands, and [CONTEXT.MD](../CONTEXT.MD) is the next-session handoff. Recheck source and tests if you read this after the snapshot date.
+This document explains **implemented code only**. As checked on **2026-10-10**, BE-01–04 and MVP-01–03 are complete; the PostgreSQL and runner-enabled backend suite passed 74 tests with no skips. The [roadmap](TICKETS.md) remains the source for pending tickets and completion criteria; [BACKEND.md](BACKEND.md) describes the target architecture, [backend/README.md](../backend/README.md) contains runnable setup commands, and [CONTEXT.MD](../CONTEXT.MD) is the next-session handoff. Recheck source and tests if you read this after the snapshot date.
 
 ## Start with the part that runs now
 
