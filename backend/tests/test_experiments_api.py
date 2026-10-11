@@ -16,9 +16,11 @@ pytestmark = pytest.mark.postgres
 
 
 @pytest.fixture
-def api(disposable_database, alembic_config, monkeypatch):
+def api(disposable_database, alembic_config, monkeypatch, tmp_path):
     command.upgrade(alembic_config, "head")
     monkeypatch.setenv("FLUKE_DATABASE_URL", disposable_database.url.render_as_string(False))
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setenv("FLUKE_ARTIFACTS_DIR", str(artifacts))
     database = Database(Settings())
     accounts = AccountService(database)
     accounts.create_user("alice@example.com", "alice password")
@@ -158,3 +160,38 @@ def test_owner_isolation_and_missing_ids(api):
     assert client.get(f"/api/v1/runs/{uuid4()}", headers=alice).status_code == 404
     assert client.get("/api/v1/experiments").status_code == 401
     assert client.post("/api/v1/experiments", json=form()).status_code == 401
+
+
+def test_owned_run_exposes_result_and_bounded_log(api):
+    client, database, tokens = api
+    alice = auth(tokens["alice"])
+    bob = auth(tokens["bob"])
+    experiment = client.post("/api/v1/experiments", headers=alice, json=form()).json()
+    run = client.post(f"/api/v1/experiments/{experiment['id']}/runs", headers=alice).json()
+    run_id = run["id"]
+    assert run["result"] is None
+    assert client.get(f"/api/v1/runs/{run_id}/logs", headers=alice).json() == {"text": ""}
+
+    from fluke_backend.experiments.models import Run
+
+    log_path = client.app.state.settings.artifacts_dir / "runs" / run_id / "run.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("old line\n" + "x" * 70000 + "\nlatest line\n")
+    with database.transaction() as session:
+        session.get(Run, run_id).status = "RUNNING"
+    logs = client.get(f"/api/v1/runs/{run_id}/logs", headers=alice)
+    assert logs.status_code == 200
+    assert logs.json()["text"].endswith("latest line\n")
+    assert len(logs.json()["text"].encode()) <= 65536
+    assert "old line" not in logs.json()["text"]
+
+    result = {"algorithm": "fedavg", "rounds": [{"round": 1, "accuracy": 0.5}]}
+    with database.transaction() as session:
+        stored = session.get(Run, run_id)
+        stored.result = result
+        stored.status = "COMPLETED"
+    detail = client.get(f"/api/v1/runs/{run_id}", headers=alice)
+    assert detail.status_code == 200
+    assert detail.json()["result"] == result
+    assert client.get(f"/api/v1/runs/{run_id}/logs", headers=bob).status_code == 404
+    assert client.get(f"/api/v1/runs/{uuid4()}/logs", headers=alice).status_code == 404

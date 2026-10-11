@@ -1,6 +1,7 @@
 """Authenticated experiment and queued-run endpoints."""
 
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -53,6 +54,7 @@ class RunResponse(BaseModel):
     experiment_id: UUID
     config: dict
     status: Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED"]
+    result: dict | None
     failure_message: str | None
     created_at: datetime
     updated_at: datetime
@@ -132,3 +134,23 @@ def get_run(request: Request, run_id: UUID, user: CurrentUser) -> RunResponse:
         return _run(_service(request).get_run(user.id, run_id))
     except ResourceNotFound:
         raise _not_found() from None
+
+
+class RunLogResponse(BaseModel):
+    text: str
+
+
+@router.get("/runs/{run_id}/logs", response_model=RunLogResponse)
+def get_run_logs(request: Request, run_id: UUID, user: CurrentUser) -> RunLogResponse:
+    try:
+        _service(request).get_run(user.id, run_id)
+    except ResourceNotFound:
+        raise _not_found() from None
+    log_path: Path = request.app.state.settings.artifacts_dir / "runs" / str(run_id) / "run.log"
+    try:
+        with log_path.open("rb") as log:
+            log.seek(0, 2)
+            log.seek(max(0, log.tell() - 65536))
+            return RunLogResponse(text=log.read().decode("utf-8", errors="replace"))
+    except FileNotFoundError:
+        return RunLogResponse(text="")

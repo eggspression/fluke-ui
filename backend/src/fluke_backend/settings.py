@@ -1,5 +1,6 @@
 """Environment configuration, validated when the application is created."""
 
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from pydantic import Field, PostgresDsn, SecretStr, TypeAdapter, field_validator
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
     database_url: SecretStr
     jwt_secret: SecretStr
     development_origins: list[str] = Field(default_factory=list)
+    artifacts_dir: Path = Path("artifacts")
 
     @field_validator("database_url")
     @classmethod

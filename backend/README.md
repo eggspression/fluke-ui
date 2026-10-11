@@ -2,8 +2,8 @@
 
 Milestone A (BE-01–04) provides an installable API, PostgreSQL persistence,
 reversible migrations, health endpoints, operator account management, and
-one-hour JWT login. MVP-02 adds a separate FLUKE CPU runner. MVP-03 adds owned
-experiments and queued run requests. Worker execution is a later ticket.
+one-hour JWT login. MVP-02 adds the FLUKE CPU runner, MVP-03 adds owned
+experiments and queued runs, and MVP-04 adds one local worker with results and logs.
 
 ## Requirements
 
@@ -43,6 +43,8 @@ secret stops startup with an error naming `jwt_secret`. Environment variables
 override `.env`; importing the application does not read settings or connect.
 For a separate frontend dev server, set `FLUKE_DEVELOPMENT_ORIGINS` to a JSON
 list of exact origins, such as `["http://localhost:4200"]`. Its default is empty.
+`FLUKE_ARTIFACTS_DIR` defaults to `artifacts`; run the API and worker with the
+same value so owned log reads find the worker's files.
 
 ```sh
 docker compose up -d --wait postgres
@@ -160,13 +162,37 @@ complete replacement form works until the experiment has a run; it then returns
 `409`. `POST /api/v1/experiments/{id}/runs` returns `202` and a `QUEUED` run
 with a copy of that experiment's configuration. Owned run detail and
 per-experiment history are available through `GET /api/v1/runs/{id}` and
-`GET /api/v1/experiments/{id}/runs`. The API does not start FLUKE or process the
-queue yet. [The MVP-03 guide](../docs/IMPLEMENTATION_GUIDE.md) has a full manual
-test, including invalid forms and a second user's access checks.
+`GET /api/v1/experiments/{id}/runs`. The API only queues the run; start the
+worker below to process it. Test invalid forms and ownership with the API's
+OpenAPI page and a second account.
 
-**Next ticket:** [MVP-04](../docs/TICKETS.md) adds the one-process worker and owned
-accuracy/log reads. [CONTEXT.MD](../CONTEXT.MD) records the starting state and
-notes queued smoke-test rows already present in this machine's local database.
+## Run queued jobs through the worker
+
+Install the optional runner extra and apply the current migration, then keep the
+API and worker running in separate terminals from `backend/`:
+
+```sh
+uv sync --locked --extra runner
+uv run --locked --extra runner alembic upgrade head
+uv run --locked uvicorn fluke_backend.app:create_app --factory --host 127.0.0.1 --port 8000
+# In a second terminal, from backend/:
+uv run --locked --extra runner fluke-worker
+```
+
+The worker selects the oldest queued row and commits `RUNNING` before it launches
+the runner in a fresh process. The runner gets no database URL or JWT secret. A
+run becomes `COMPLETED` only after exit code zero and a validated result with all
+requested rounds and finite accuracy; otherwise it becomes `FAILED` with a short
+reason. `GET /api/v1/runs/{id}` includes nullable `result` with `algorithm` and
+`rounds`, and `GET /api/v1/runs/{id}/logs` returns `{ "text": "..." }` with at most
+64 KiB of recent text. Both routes enforce ownership and return `404` for another
+user's ID. Files stay under `FLUKE_ARTIFACTS_DIR/runs/<server-generated-run-id>`.
+
+The first run may download the full MNIST files before using the fixed 1% sample.
+The local worker processes one run at a time. If it starts with an unresolved
+`RUNNING` row, it stops and names that run for manual investigation; it neither
+resumes nor cancels an unknown process. Check existing queued rows before starting
+it on a long-lived development database.
 
 `docker compose down` stops the development database and retains its named volume.
 The configured password initializes a new volume; changing `.env` does not change
@@ -217,7 +243,7 @@ Alembic migrations live in `backend/migrations/`. `uv run --locked alembic curre
 shows the database revision. `uv run --locked alembic check` compares ORM metadata
 with the applied schema. The first migration created `users` and `sessions`; MVP-01 adds a second
 migration that drops `sessions` while preserving users. MVP-03 adds `experiments`
-and `runs`; current head is `20261008_0003`. The schema has UUID keys and
+and `runs`; current head is `20261010_0004`. The schema has UUID keys and
 timezone-aware timestamps. SQLAlchemy sessions commit when
 their transaction block succeeds and roll back on errors. Revision compatibility
 is checked on every readiness request.
@@ -254,10 +280,6 @@ Alembic, psycopg, Argon2, email-validator, and PyJWT. The `dev`
 group adds pytest, HTTPX, and Ruff. The optional `runner` extra installs the
 pinned FLUKE stack for direct CPU runs. The ordinary API install and API imports
 do not need FLUKE or PyTorch.
-
-The MVP will add experiment, run, and worker code only when those
-responsibilities are implemented; the active scope is in
-[TICKETS.md](../docs/TICKETS.md).
 
 If uv's normal cache is unavailable in a restricted workspace, set
 `UV_CACHE_DIR` and `UV_PYTHON_INSTALL_DIR` to writable, ignored local directories.

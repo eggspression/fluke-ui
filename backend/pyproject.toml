@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 fluke-admin = "fluke_backend.auth.cli:run"
+fluke-worker = "fluke_backend.worker:main"
 
 [dependency-groups]
 dev = ["httpx>=0.28,<1", "pytest>=8,<10", "ruff>=0.15,<1"]
