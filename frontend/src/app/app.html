@@ -1,0 +1,13 @@
+<header class="site-header">
+  <div class="shell header-content">
+    <a class="brand" routerLink="/experiments">FLUKE UI</a>
+    @if (auth.user(); as user) {
+      <nav aria-label="Main navigation">
+        <a routerLink="/experiments">Experiments</a>
+        <span>{{ user.email }}</span>
+        <button type="button" class="text-button" (click)="logout()">Log out</button>
+      </nav>
+    }
+  </div>
+</header>
+<main class="shell"><router-outlet /></main>
